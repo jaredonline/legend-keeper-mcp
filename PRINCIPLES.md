@@ -68,6 +68,14 @@ The MCP stdio transport uses stdout for JSON-RPC. All diagnostic output (startup
 - No feature flags. All tools are always available.
 - No plugins. The tool set is fixed at compile time.
 
-## 12. Test Against Real Data
+## 12. World-Level Conventions via Tags
+
+Special behavior is driven by resource tags rather than names or config files. Currently:
+
+- `llm-guide`: A resource tagged `llm-guide` is treated as a world instruction guide. Its first page document is rendered as markdown and included in the `list_worlds` response, so the LLM sees it automatically. The resource name doesn't matter — only the tag.
+
+This pattern keeps configuration inside the world data (no external config files) and is discoverable via `list_resources` with a tag filter.
+
+## 13. Test Against Real Data
 
 Reference `.lk` files live in `tests/reference/` (gitignored). Currently: `rime.lk` (124 resources, no custom calendars) and `siqram.lk` (296 resources, 1 custom calendar with timelines). Integration tests deserialize every `.lk` file in that directory. When Legend Keeper updates their format, drop a fresh export in `tests/reference/`, run `cargo test`, and fix whatever breaks.

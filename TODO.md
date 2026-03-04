@@ -85,8 +85,32 @@
 - [x] Verify `get_resource` name lookup handles multiple resources with same name gracefully
 - [x] Verify `get_calendar` returns useful calendar structure
 - [x] Verify world omission works when only one world loaded
-- [ ] Test hot-reload: start server, drop new .lk file in directory, verify `list_worlds` reflects it
+- [x] Test hot-reload: start server, drop new .lk file in directory, verify `list_worlds` reflects it
 - [ ] Test full flow: configure as MCP server in Claude Code, use tools interactively
+
+## 1.7: Map & Image Awareness
+- [x] Add `MapFeature` struct to `schema.rs` with optional fields for pin/region/label/path types
+- [x] Add `MapContent` struct to `schema.rs`
+- [x] Implement `format_map_document()` in `server.rs` — shared renderer for map docs
+- [x] Render pins as markdown table with name, position, icon, linked resource ID
+- [x] Render regions with vertex count and fill/border style
+- [x] Render paths with waypoint count and stroke style
+- [x] Render labels with size and position
+- [x] Include calibration scale when present on map presentation
+- [x] Parse `lk://resources/{id}/docs/{id}` URIs to extract resource IDs for pin links
+- [x] Update `format_resource()` to use `format_map_document()` for map documents
+- [x] Add `get_map` tool — lookup resource, find map document, render with `format_map_document()`
+- [x] Verify deserialization still passes with new MapFeature/MapContent types
+- [x] Test map pin deserialization against reference data (18 pins across 15 maps in Rime)
+- [ ] Test with Claude Desktop: "What locations are on the main map?" → gets pin names and positions
+
+## 1.8: World Instructions (llm-guide)
+- [x] Add `guide: Option<String>` to `WorldSummary` in `store.rs`
+- [x] Implement `extract_world_guide()` — scan resources for `llm-guide` tag, return first page doc as markdown
+- [x] Include guide in `list_worlds` response
+- [x] Update `list_worlds` tool description to mention guide field
+- [x] Test guide detection runs without error on reference worlds (no llm-guide tags present)
+- [ ] Test with a world that has a resource tagged `llm-guide`
 
 ---
 

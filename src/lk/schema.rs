@@ -179,6 +179,51 @@ pub struct CalendarFormat {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MapFeature {
+    pub id: String,
+    pub name: String,
+    pub pos: [f64; 2],
+    #[serde(rename = "type")]
+    pub feature_type: Option<String>,
+    pub rank: Option<String>,
+    #[serde(default)]
+    pub is_synced: bool,
+    // Pin fields
+    pub uri: Option<String>,
+    pub icon_glyph: Option<String>,
+    pub icon_color: Option<String>,
+    pub icon_shape: Option<String>,
+    // Region fields
+    pub polygon: Option<Vec<[f64; 2]>>,
+    pub fill_opacity: Option<f64>,
+    pub fill_visibility: Option<String>,
+    pub label_visibility: Option<String>,
+    pub border_style: Option<String>,
+    pub fill_style: Option<String>,
+    // Label fields
+    pub label_size: Option<String>,
+    pub font_family: Option<String>,
+    pub color_a: Option<String>,
+    pub color_b: Option<String>,
+    pub label_style: Option<Value>,
+    // Path fields
+    pub polyline: Option<Vec<[f64; 2]>>,
+    pub color: Option<String>,
+    pub stroke_width: Option<f64>,
+    pub stroke_style: Option<String>,
+    pub stroke_opacity: Option<f64>,
+    pub curviness: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapContent {
+    #[serde(default)]
+    pub pins: Vec<MapFeature>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TimelineContent {
     #[serde(default)]
     pub lanes: Vec<Lane>,

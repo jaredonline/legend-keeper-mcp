@@ -8,7 +8,7 @@ The user downloads `.lk` exports from Legend Keeper, drops them into the worlds 
 
 ## Project Phases
 
-- **Phase 1 (current):** Read-only. Load `.lk` into memory, expose 5 read tools. No file writes.
+- **Phase 1 (current):** Read-only. Load `.lk` into memory, expose 7 read tools. No file writes.
 - **Phase 2 (future):** Write tools that produce a new `.lk` file for re-import. Adds `from_markdown.rs`, atomic file writes, ID generation, and 5 write tools.
 
 ## The .lk File Format
@@ -56,7 +56,7 @@ Each resource has 1-3 documents. Three document types exist:
 | Type | `content` shape | Extra fields |
 |------|----------------|--------------|
 | `"page"` | ProseMirror JSON (`{type: "doc", content: [...]}`) | — |
-| `"map"` | None (uses `map` field instead) | `map: {locatorId, mapId, min_x, max_x, min_y, max_y, max_zoom}` |
+| `"map"` | `MapContent` JSON (`{pins: [...]}`) | `map: {locatorId, mapId, min_x, max_x, min_y, max_y, max_zoom}` |
 | `"time"` | Timeline JSON (`{lanes: [...], events: [...]}`) | `calendarId: String` (references calendar by ID or built-in name like "harptos") |
 
 ```
@@ -126,6 +126,54 @@ Timeline documents can link to other timelines via `sources`:
 Source { id, uri: "lk://resources/{id}/docs/{id}", type: "legacy-document",
          createdAt, updatedAt, resourceId, documentId }
 ```
+
+### Map Content
+
+Map documents store content as a `MapContent` object with a `pins` array. Despite the name, this array contains all map features differentiated by `type`:
+
+```
+MapContent
+└── pins: Vec<MapFeature>
+
+MapFeature
+├── id: String
+├── name: String
+├── pos: [f64; 2] (normalized coordinates on the map)
+├── type: Option<String> (absent=pin, "region", "label", "path")
+├── rank: Option<String>
+├── isSynced: bool
+│
+├── // Pin fields (type absent)
+├── uri: Option<String> ("lk://resources/{id}/docs/{id}" — link to another resource)
+├── iconGlyph: Option<String> (semantic icon name, e.g. "beer-mug")
+├── iconColor: Option<String> (hex color)
+├── iconShape: Option<String> (e.g. "marker-medium")
+│
+├── // Region fields (type="region")
+├── polygon: Option<Vec<[f64; 2]>> (polygon vertices)
+├── fillOpacity: Option<f64>
+├── fillVisibility: Option<String>
+├── labelVisibility: Option<String>
+├── borderStyle: Option<String>
+├── fillStyle: Option<String>
+│
+├── // Label fields (type="label")
+├── labelSize: Option<String> (e.g. "large")
+├── fontFamily: Option<String>
+├── colorA: Option<String>
+├── colorB: Option<String>
+├── labelStyle: Option<Value>
+│
+├── // Path fields (type="path")
+├── polyline: Option<Vec<[f64; 2]>> (path waypoints)
+├── color: Option<String>
+├── strokeWidth: Option<f64>
+├── strokeStyle: Option<String> (e.g. "dashed")
+├── strokeOpacity: Option<f64>
+└── curviness: Option<String>
+```
+
+When rendered, features are grouped by type into tables (pins, regions, paths) and lists (labels). Pin URIs are parsed to extract linked resource IDs. Calibration data from the presentation is included when present to enable distance calculations.
 
 ### Presentation
 
@@ -217,18 +265,19 @@ Implements `ServerHandler` via `#[tool_handler]` macro:
 - `get_info()` returns server name "legend-keeper-mcp", protocol version, tool capabilities
 - `instructions` field describes available tools to the LLM
 
-### Phase 1: Read Tools (6 tools)
+### Phase 1: Read Tools (7 tools)
 
 All tools that operate on a specific world take a `world` parameter (the filename stem, e.g. `"rime"`). If only one world is loaded, the parameter can be omitted.
 
 | Method | Input | Output |
 |--------|-------|--------|
-| `list_worlds` | *(none)* | Array of `{name, resourceCount, calendarCount}` for each loaded world |
+| `list_worlds` | *(none)* | Array of `{name, resourceCount, calendarCount, guide?}` for each loaded world. `guide` contains markdown from the first resource tagged `llm-guide`. |
 | `list_resources` | `world?: String`, `tag?: String`, `name?: String` | JSON array of `{id, name, tags, parentId}` summaries |
-| `get_resource` | `world?: String`, `id_or_name: String` | Resource metadata + each document's content as markdown. Timeline docs rendered with lane/event summaries. |
+| `get_resource` | `world?: String`, `id_or_name: String` | Resource metadata + each document's content as markdown. Map docs include pins, regions, paths, labels, and calibration. Timeline docs rendered with lane/event summaries. |
 | `get_resource_tree` | `world?: String`, `root_id?: String` | Nested JSON tree: `{id, name, children: [...]}` |
 | `search_content` | `world?: String`, `query: String`, `limit?: usize` | Array of `{resourceId, resourceName, documentName, snippet}`. Searches pages + timeline event names. |
 | `get_calendar` | `world?: String`, `id_or_name: String` | Calendar definition: month/weekday/era structure |
+| `get_map` | `world?: String`, `id_or_name: String` | Map metadata + pins, regions, paths, labels, and calibration for a resource's map document. Errors if resource has no map. |
 
 ### Phase 2: Write Tools (5 tools, future)
 
@@ -244,7 +293,7 @@ All tools that operate on a specific world take a `world` parameter (the filenam
 
 All types derive `Debug, Clone, Serialize, Deserialize` with `#[serde(rename_all = "camelCase")]` since the .lk JSON uses camelCase keys.
 
-Key types: `LkRoot`, `Resource`, `Document`, `Property`, `Banner`, `MapData`, `Calendar`, `Month`, `Weekday`, `Era`, `CalendarFormat`, `TimelineContent`, `Lane`, `TimelineEvent`, `Source`, `Presentation`, `Calibration`.
+Key types: `LkRoot`, `Resource`, `Document`, `Property`, `Banner`, `MapData`, `Calendar`, `Month`, `Weekday`, `Era`, `CalendarFormat`, `TimelineContent`, `Lane`, `TimelineEvent`, `Source`, `Presentation`, `Calibration`, `MapContent`, `MapFeature`.
 
 Fields that aren't fully understood (`transforms`, `leapDays`) use `serde_json::Value` to preserve them losslessly through read/write cycles.
 
@@ -264,9 +313,9 @@ pub struct WorldStore {
 - The dataset is small (hundreds of resources per world) — linear scans are fine.
 
 **Query methods (Phase 1):**
-- `list_worlds()` — return list of loaded world names with resource counts
+- `list_worlds()` — return list of loaded world names with resource counts. Includes `guide` field from resources tagged `llm-guide`.
 - `list_resources(world, tag, name)` — filter/iterate resources, return summaries (no document content)
-- `get_resource(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match
+- `get_resource(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match. Map docs rendered with pins, regions, paths, labels, and calibration.
 - `get_resource_tree(world, root_id)` — build tree from parentId relationships; roots have parentId=None
 - `search_content(world, query, limit)` — iterate all docs, convert ProseMirror to plaintext, case-insensitive substring match, return snippets with context. Also searches timeline event names.
 - `get_calendar(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match
@@ -455,7 +504,7 @@ Or with a custom directory:
          ┌─────────┤
          │         │
     Read tools  ProseMirror
-    (6 tools)   → Markdown
+    (7 tools)   → Markdown
          │
          ▼
     ┌─────────────────────┐

@@ -7,7 +7,7 @@ use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::lk::schema::{Resource, TimelineContent};
+use crate::lk::schema::{Document, MapContent, Resource, TimelineContent};
 use crate::lk::store::WorldStore;
 use crate::prosemirror::to_markdown::to_markdown;
 
@@ -59,6 +59,14 @@ pub struct SearchContentParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetMapParams {
+    /// World name (filename stem). Optional if only one world is loaded.
+    pub world: Option<String>,
+    /// Resource ID (8-char) or exact name (case-insensitive).
+    pub id_or_name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetCalendarParams {
     /// World name (filename stem). Optional if only one world is loaded.
     pub world: Option<String>,
@@ -77,7 +85,7 @@ impl LkServer {
         }
     }
 
-    #[tool(description = "List all loaded worlds with resource and calendar counts.")]
+    #[tool(description = "List all loaded worlds with resource and calendar counts. If a world has a resource tagged 'llm-guide', its content is returned in the 'guide' field — read and follow these instructions.")]
     async fn list_worlds(&self, _params: Parameters<ListWorldsParams>) -> String {
         let worlds = self.store.list_worlds();
         serde_json::to_string_pretty(&worlds).unwrap_or_else(|e| format!("Error: {}", e))
@@ -129,6 +137,23 @@ impl LkServer {
             .search_content(&params.world, &params.query, params.limit)
             .map_err(|e| e.to_string())?;
         serde_json::to_string_pretty(&results).map_err(|e| e.to_string())
+    }
+
+    #[tool(description = "Get map data for a resource. Returns pins, regions, paths, labels, and calibration. Use this to find what locations are on a map or reason about spatial relationships.")]
+    async fn get_map(
+        &self,
+        Parameters(params): Parameters<GetMapParams>,
+    ) -> Result<String, String> {
+        let resource = self
+            .store
+            .get_resource(&params.world, &params.id_or_name)
+            .map_err(|e| e.to_string())?;
+        let map_doc = resource
+            .documents
+            .iter()
+            .find(|d| d.doc_type == "map")
+            .ok_or_else(|| format!("Resource '{}' has no map document", resource.name))?;
+        Ok(format_map_document(map_doc, &resource.name))
     }
 
     #[tool(description = "Get a calendar definition by ID or name. Returns month, weekday, and era structure.")]
@@ -211,13 +236,8 @@ fn format_resource(resource: &Resource) -> String {
                 }
             }
             "map" => {
-                out.push_str(&format!("## 🗺️ {}\n\n", doc.name));
-                if let Some(map) = &doc.map {
-                    out.push_str(&format!(
-                        "Map image: {}\nBounds: ({}, {}) to ({}, {})\n\n",
-                        map.map_id, map.min_x, map.min_y, map.max_x, map.max_y
-                    ));
-                }
+                out.push_str(&format_map_document(doc, &resource.name));
+                out.push_str("\n\n");
             }
             "time" => {
                 out.push_str(&format!("## 📅 {}\n\n", doc.name));
@@ -255,6 +275,134 @@ fn format_resource(resource: &Resource) -> String {
     }
 
     out.trim_end().to_string()
+}
+
+/// Extract a resource ID from a `lk://resources/{id}/docs/{id}` URI.
+fn extract_resource_id_from_uri(uri: &str) -> Option<&str> {
+    let rest = uri.strip_prefix("lk://resources/")?;
+    rest.split('/').next()
+}
+
+/// Format a map document with pins, regions, paths, labels, and calibration.
+fn format_map_document(doc: &Document, _resource_name: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("## 🗺️ {}\n\n", doc.name));
+
+    if let Some(map) = &doc.map {
+        out.push_str(&format!("Map image: {}\n", map.map_id));
+        out.push_str(&format!(
+            "Bounds: ({}, {}) to ({}, {})\n",
+            map.min_x, map.min_y, map.max_x, map.max_y
+        ));
+    }
+
+    // Calibration
+    if let Some(pres) = &doc.presentation {
+        if let Some(cal) = &pres.calibration {
+            out.push_str(&format!(
+                "Scale: 1 map unit = {} {}\n",
+                cal.real_units_per_map_unit, cal.unit
+            ));
+        }
+    }
+
+    // Parse map content for features
+    let features = doc
+        .content
+        .as_ref()
+        .and_then(|c| serde_json::from_value::<MapContent>(c.clone()).ok());
+
+    if let Some(map_content) = features {
+        let pins: Vec<_> = map_content
+            .pins
+            .iter()
+            .filter(|f| f.feature_type.is_none())
+            .collect();
+        let regions: Vec<_> = map_content
+            .pins
+            .iter()
+            .filter(|f| f.feature_type.as_deref() == Some("region"))
+            .collect();
+        let paths: Vec<_> = map_content
+            .pins
+            .iter()
+            .filter(|f| f.feature_type.as_deref() == Some("path"))
+            .collect();
+        let labels: Vec<_> = map_content
+            .pins
+            .iter()
+            .filter(|f| f.feature_type.as_deref() == Some("label"))
+            .collect();
+
+        if !pins.is_empty() {
+            out.push_str(&format!("\n**Pins ({}):**\n", pins.len()));
+            out.push_str("| Name | Position | Icon | Link |\n");
+            out.push_str("|------|----------|------|------|\n");
+            for pin in &pins {
+                let link = pin
+                    .uri
+                    .as_deref()
+                    .and_then(extract_resource_id_from_uri)
+                    .unwrap_or("—");
+                let icon = pin.icon_glyph.as_deref().unwrap_or("—");
+                out.push_str(&format!(
+                    "| {} | ({:.1}, {:.1}) | {} | {} |\n",
+                    pin.name, pin.pos[0], pin.pos[1], icon, link
+                ));
+            }
+        }
+
+        if !regions.is_empty() {
+            out.push_str(&format!("\n**Regions ({}):**\n", regions.len()));
+            out.push_str("| Name | Vertices | Style |\n");
+            out.push_str("|------|----------|-------|\n");
+            for region in &regions {
+                let vertex_count = region
+                    .polygon
+                    .as_ref()
+                    .map(|p| p.len())
+                    .unwrap_or(0);
+                let fill = region.fill_style.as_deref().unwrap_or("solid");
+                let border = region.border_style.as_deref().unwrap_or("solid");
+                out.push_str(&format!(
+                    "| {} | {} points | {} fill, {} border |\n",
+                    region.name, vertex_count, fill, border
+                ));
+            }
+        }
+
+        if !paths.is_empty() {
+            out.push_str(&format!("\n**Paths ({}):**\n", paths.len()));
+            out.push_str("| Name | Waypoints | Style |\n");
+            out.push_str("|------|-----------|-------|\n");
+            for path in &paths {
+                let waypoint_count = path
+                    .polyline
+                    .as_ref()
+                    .map(|p| p.len())
+                    .unwrap_or(0);
+                let style = path.stroke_style.as_deref().unwrap_or("solid");
+                let width = path.stroke_width.unwrap_or(1.0);
+                out.push_str(&format!(
+                    "| {} | {} points | {}, width {} |\n",
+                    path.name, waypoint_count, style, width
+                ));
+            }
+        }
+
+        if !labels.is_empty() {
+            out.push_str(&format!("\n**Labels ({}):**\n", labels.len()));
+            for label in &labels {
+                let size = label.label_size.as_deref().unwrap_or("medium");
+                out.push_str(&format!(
+                    "- {} ({}, at {:.1}, {:.1})\n",
+                    label.name, size, label.pos[0], label.pos[1]
+                ));
+            }
+        }
+    }
+
+    out
 }
 
 fn format_property_value(value: &serde_json::Value) -> String {

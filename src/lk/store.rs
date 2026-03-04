@@ -8,6 +8,7 @@ use serde_json::Value;
 use super::io::read_lk_file;
 use super::schema::{Calendar, LkRoot, Resource, TimelineContent};
 use super::LkError;
+use crate::prosemirror::to_markdown::to_markdown;
 
 #[derive(Clone)]
 pub struct WorldStore {
@@ -20,6 +21,8 @@ pub struct WorldSummary {
     pub name: String,
     pub resource_count: usize,
     pub calendar_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guide: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -177,10 +180,26 @@ impl WorldStore {
                 name: name.clone(),
                 resource_count: root.resources.len(),
                 calendar_count: root.calendars.len(),
+                guide: Self::extract_world_guide(root),
             })
             .collect();
         result.sort_by(|a, b| a.name.cmp(&b.name));
         result
+    }
+
+    /// Find a resource tagged `llm-guide` and return its first page document as markdown.
+    fn extract_world_guide(root: &LkRoot) -> Option<String> {
+        let resource = root.resources.iter().find(|r| {
+            r.tags.iter().any(|t| t.eq_ignore_ascii_case("llm-guide"))
+        })?;
+        let page_doc = resource.documents.iter().find(|d| d.doc_type == "page")?;
+        let content = page_doc.content.as_ref()?;
+        let md = to_markdown(content);
+        if md.trim().is_empty() {
+            None
+        } else {
+            Some(md)
+        }
     }
 
     pub fn list_resources(
