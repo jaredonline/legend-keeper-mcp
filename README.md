@@ -62,11 +62,11 @@ claude mcp add legend-keeper -- /path/to/legend-keeper-mcp /path/to/my-worlds
 Ask Claude about your worlds:
 
 - "What worlds do I have loaded?"
-- "List all NPCs in my rime world"
-- "Tell me about Caer-Dineval"
-- "Search for mentions of ice in rime"
-- "Show me the calendar for siqram"
-- "Show me the resource tree for rime"
+- "List all NPCs in my world"
+- "Tell me about the capital city"
+- "Search for mentions of dragons"
+- "Show me the calendar"
+- "Show me the resource tree"
 
 ## Tools
 
