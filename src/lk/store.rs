@@ -28,6 +28,7 @@ pub struct ResourceSummary {
     pub name: String,
     pub tags: Vec<String>,
     pub parent_id: Option<String>,
+    pub is_hidden: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -213,6 +214,7 @@ impl WorldStore {
                 name: r.name.clone(),
                 tags: r.tags.clone(),
                 parent_id: r.parent_id.clone(),
+                is_hidden: r.is_hidden,
             })
             .collect();
 
