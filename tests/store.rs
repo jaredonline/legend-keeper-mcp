@@ -117,3 +117,34 @@ fn world_guide_detection() {
     }
     // Just verify it doesn't crash — guide will be None unless reference data has the tag
 }
+
+#[test]
+fn inspect_map_data() {
+    let store = WorldStore::load(Path::new("tests/reference")).unwrap();
+    for world_name in &["rime", "siqram"] {
+        let world = Some(world_name.to_string());
+        let resources = store.list_resources(&world, &None, &None).unwrap();
+        for summary in &resources {
+            let resource = store.get_resource(&world, &summary.id).unwrap();
+            for doc in &resource.documents {
+                if doc.doc_type != "map" { continue; }
+                let map_id = doc.map.as_ref().map(|m| m.map_id.as_str()).unwrap_or("(none)");
+                let mut pins = 0; let mut regions = 0; let mut labels = 0; let mut paths = 0; let mut other = 0;
+                if let Some(content) = &doc.content {
+                    if let Ok(mc) = serde_json::from_value::<legend_keeper_mcp::lk::schema::MapContent>(content.clone()) {
+                        for f in &mc.pins {
+                            match f.feature_type.as_deref() {
+                                None => pins += 1,
+                                Some("region") => regions += 1,
+                                Some("label") => labels += 1,
+                                Some("path") => paths += 1,
+                                Some(_) => other += 1,
+                            }
+                        }
+                    }
+                }
+                eprintln!("[{}] {} / {} — map_id={} | pins={} regions={} labels={} paths={} other={}", world_name, resource.name, doc.name, map_id, pins, regions, labels, paths, other);
+            }
+        }
+    }
+}

@@ -2,8 +2,8 @@ use std::future::Future;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::Parameters;
-use rmcp::model::{ServerCapabilities, ServerInfo};
-use rmcp::{tool, tool_handler, tool_router, ServerHandler};
+use rmcp::model::{CallToolResult, Content, ServerCapabilities, ServerInfo};
+use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -139,21 +139,49 @@ impl LkServer {
         serde_json::to_string_pretty(&results).map_err(|e| e.to_string())
     }
 
-    #[tool(description = "Get map data for a resource. Returns pins, regions, paths, labels, and calibration. Use this to find what locations are on a map or reason about spatial relationships.")]
+    #[tool(description = "Get map data for a resource. Returns pins, regions, paths, labels, calibration, and the map image when available. Use this to visually inspect a map or reason about spatial relationships.")]
     async fn get_map(
         &self,
         Parameters(params): Parameters<GetMapParams>,
-    ) -> Result<String, String> {
+    ) -> Result<CallToolResult, ErrorData> {
         let resource = self
             .store
             .get_resource(&params.world, &params.id_or_name)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
         let map_doc = resource
             .documents
             .iter()
             .find(|d| d.doc_type == "map")
-            .ok_or_else(|| format!("Resource '{}' has no map document", resource.name))?;
-        Ok(format_map_document(map_doc, &resource.name))
+            .ok_or_else(|| {
+                ErrorData::internal_error(
+                    format!("Resource '{}' has no map document", resource.name),
+                    None,
+                )
+            })?;
+
+        let text = format_map_document(map_doc, &resource.name);
+        let mut contents = vec![Content::text(text)];
+
+        if let Some(map) = &map_doc.map {
+            let url = &map.map_id;
+            if url.starts_with("http") {
+                match WorldStore::fetch_image(url).await {
+                    Ok((bytes, mime)) => {
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        contents.push(Content::image(b64, mime));
+                    }
+                    Err(e) => {
+                        contents.push(Content::text(format!(
+                            "(Could not fetch map image: {})",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(CallToolResult::success(contents))
     }
 
     #[tool(description = "Get a calendar definition by ID or name. Returns month, weekday, and era structure.")]

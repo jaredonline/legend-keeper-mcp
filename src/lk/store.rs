@@ -404,6 +404,43 @@ impl WorldStore {
             .cloned()
             .ok_or_else(|| LkError::CalendarNotFound(id_or_name.to_string()))
     }
+
+    pub async fn fetch_image(url: &str) -> Result<(Vec<u8>, String), LkError> {
+        let resp = reqwest::get(url)
+            .await
+            .map_err(|e| LkError::Http(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(LkError::Http(format!("HTTP {}", resp.status())));
+        }
+
+        let mime = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| guess_mime_from_url(url));
+
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| LkError::Http(e.to_string()))?;
+
+        Ok((bytes.to_vec(), mime))
+    }
+}
+
+fn guess_mime_from_url(url: &str) -> String {
+    let lower = url.to_lowercase();
+    if lower.ends_with(".png") {
+        "image/png".to_string()
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg".to_string()
+    } else if lower.ends_with(".webp") {
+        "image/webp".to_string()
+    } else {
+        "image/png".to_string()
+    }
 }
 
 /// Recursively extract plain text from a ProseMirror JSON node.

@@ -18,4 +18,6 @@ pub enum LkError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("HTTP error: {0}")]
+    Http(String),
 }
