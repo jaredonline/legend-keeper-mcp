@@ -82,7 +82,7 @@ Ask Claude about your worlds:
 | `get_resource_tree` | Get the nested resource hierarchy |
 | `search_content` | Search page text and timeline event names |
 | `get_calendar` | Get a custom calendar definition |
-| `get_map` | Get map data: pins, regions, paths, labels, and calibration |
+| `get_map` | Get map data: pins with positions, regions with vertex coordinates, paths with full waypoint coordinates, labels, and calibration. Coordinates enable precise distance/area calculations. |
 
 All tools that operate on a specific world take an optional `world` parameter (the filename without `.lk`). If only one world is loaded, it's used automatically.
 

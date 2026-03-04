@@ -382,38 +382,44 @@ fn format_map_document(doc: &Document, _resource_name: &str) -> String {
 
         if !regions.is_empty() {
             out.push_str(&format!("\n**Regions ({}):**\n", regions.len()));
-            out.push_str("| Name | Vertices | Style |\n");
-            out.push_str("|------|----------|-------|\n");
             for region in &regions {
-                let vertex_count = region
-                    .polygon
-                    .as_ref()
-                    .map(|p| p.len())
-                    .unwrap_or(0);
                 let fill = region.fill_style.as_deref().unwrap_or("solid");
                 let border = region.border_style.as_deref().unwrap_or("solid");
+                let vertices = region
+                    .polygon
+                    .as_ref()
+                    .map(|pts| {
+                        pts.iter()
+                            .map(|p| format!("({:.1}, {:.1})", p[0], p[1]))
+                            .collect::<Vec<_>>()
+                            .join(" → ")
+                    })
+                    .unwrap_or_default();
                 out.push_str(&format!(
-                    "| {} | {} points | {} fill, {} border |\n",
-                    region.name, vertex_count, fill, border
+                    "- **{}** ({} fill, {} border): {}\n",
+                    region.name, fill, border, vertices
                 ));
             }
         }
 
         if !paths.is_empty() {
             out.push_str(&format!("\n**Paths ({}):**\n", paths.len()));
-            out.push_str("| Name | Waypoints | Style |\n");
-            out.push_str("|------|-----------|-------|\n");
             for path in &paths {
-                let waypoint_count = path
-                    .polyline
-                    .as_ref()
-                    .map(|p| p.len())
-                    .unwrap_or(0);
                 let style = path.stroke_style.as_deref().unwrap_or("solid");
                 let width = path.stroke_width.unwrap_or(1.0);
+                let waypoints = path
+                    .polyline
+                    .as_ref()
+                    .map(|pts| {
+                        pts.iter()
+                            .map(|p| format!("({:.1}, {:.1})", p[0], p[1]))
+                            .collect::<Vec<_>>()
+                            .join(" → ")
+                    })
+                    .unwrap_or_default();
                 out.push_str(&format!(
-                    "| {} | {} points | {}, width {} |\n",
-                    path.name, waypoint_count, style, width
+                    "- **{}** ({}, width {}): {}\n",
+                    path.name, style, width, waypoints
                 ));
             }
         }

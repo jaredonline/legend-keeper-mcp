@@ -93,8 +93,8 @@
 - [x] Add `MapContent` struct to `schema.rs`
 - [x] Implement `format_map_document()` in `server.rs` — shared renderer for map docs
 - [x] Render pins as markdown table with name, position, icon, linked resource ID
-- [x] Render regions with vertex count and fill/border style
-- [x] Render paths with waypoint count and stroke style
+- [x] Render regions with full vertex coordinates and fill/border style
+- [x] Render paths with full waypoint coordinates and stroke style
 - [x] Render labels with size and position
 - [x] Include calibration scale when present on map presentation
 - [x] Parse `lk://resources/{id}/docs/{id}` URIs to extract resource IDs for pin links
