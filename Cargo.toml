@@ -1,0 +1,16 @@
+[package]
+name = "legend-keeper-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rmcp = { version = "0.3", features = ["server", "transport-io"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1.0"
+flate2 = "1"
+sha2 = "0.10"
+notify = "7"
+anyhow = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }

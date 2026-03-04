@@ -3,88 +3,88 @@
 # Phase 1: Read-Only Server
 
 ## 1.1: Project Skeleton
-- [ ] Run `cargo init` to create Rust project
-- [ ] Set up `Cargo.toml` with Phase 1 dependencies (rmcp, serde, serde_json, schemars, flate2, sha2, notify, anyhow, thiserror, tokio)
-- [ ] Create module directory structure: `src/lk/`, `src/prosemirror/`
-- [ ] Create `tests/reference/` directory, move `rime.lk` and `siqram.lk` there
-- [ ] Update `.gitignore` for `tests/reference/*.lk`
-- [ ] Create all `mod.rs` files with placeholder re-exports
-- [ ] Write minimal `main.rs` that resolves worlds directory and prints usage
-- [ ] Verify `cargo build` succeeds
+- [x] Run `cargo init` to create Rust project
+- [x] Set up `Cargo.toml` with Phase 1 dependencies (rmcp, serde, serde_json, schemars, flate2, sha2, notify, anyhow, thiserror, tokio)
+- [x] Create module directory structure: `src/lk/`, `src/prosemirror/`
+- [x] Create `tests/reference/` directory, move `rime.lk` and `siqram.lk` there
+- [x] Update `.gitignore` for `tests/reference/*.lk`
+- [x] Create all `mod.rs` files with placeholder re-exports
+- [x] Write minimal `main.rs` that resolves worlds directory and prints usage
+- [x] Verify `cargo build` succeeds
 
 ## 1.2: Schema + File I/O
-- [ ] Define `LkRoot` struct in `src/lk/schema.rs` with all fields (version, exportId, exportedAt, resources, calendars, resourceCount, hash)
-- [ ] Define `Resource` struct with all 17 fields (schemaVersion, id, name, parentId, pos, createdBy, isHidden, isLocked, showPropertyBar, iconColor, iconGlyph, iconShape, aliases, tags, documents, properties, banner)
-- [ ] Define `Document` struct with all fields including optional content, map, calendarId, isFullWidth, and typed presentation
-- [ ] Define `Property` struct with type-agnostic `data: Value`, plus `isHidden` and `isTitleHidden` fields
-- [ ] Define `Banner` and `MapData` structs
-- [ ] Define `Presentation` struct with `documentType`, optional `calibration`, `defaultMode`, `disallowedModes`
-- [ ] Define `Calibration` struct
-- [ ] Define `Calendar` struct with all fields (id, name, hasZeroYear, maxMinutes, months, leapDays, weekdays, epochWeekday, weekResetsEachMonth, hoursInDay, minutesInHour, negativeEra, positiveEras, format, halfClock)
-- [ ] Define `Month`, `Weekday`, `Era`, `CalendarFormat` structs
-- [ ] Define `TimelineContent` struct with lanes and events
-- [ ] Define `Lane` and `TimelineEvent` structs
-- [ ] Define `Source` struct (id, uri, type, createdAt, updatedAt, resourceId, documentId)
-- [ ] Implement `read_lk_file()` in `src/lk/io.rs` — open file, GzDecoder, serde_json::from_reader
-- [ ] **Integration test**: deserialize every `.lk` file in `tests/reference/`, verify no errors, log resource/calendar counts
-- [ ] Fix any deserialization issues discovered by the tests
+- [x] Define `LkRoot` struct in `src/lk/schema.rs` with all fields (version, exportId, exportedAt, resources, calendars, resourceCount, hash)
+- [x] Define `Resource` struct with all 17 fields (schemaVersion, id, name, parentId, pos, createdBy, isHidden, isLocked, showPropertyBar, iconColor, iconGlyph, iconShape, aliases, tags, documents, properties, banner)
+- [x] Define `Document` struct with all fields including optional content, map, calendarId, isFullWidth, and typed presentation
+- [x] Define `Property` struct with type-agnostic `data: Value`, plus `isHidden` and `isTitleHidden` fields
+- [x] Define `Banner` and `MapData` structs
+- [x] Define `Presentation` struct with `documentType`, optional `calibration`, `defaultMode`, `disallowedModes`
+- [x] Define `Calibration` struct
+- [x] Define `Calendar` struct with all fields (id, name, hasZeroYear, maxMinutes, months, leapDays, weekdays, epochWeekday, weekResetsEachMonth, hoursInDay, minutesInHour, negativeEra, positiveEras, format, halfClock)
+- [x] Define `Month`, `Weekday`, `Era`, `CalendarFormat` structs
+- [x] Define `TimelineContent` struct with lanes and events
+- [x] Define `Lane` and `TimelineEvent` structs
+- [x] Define `Source` struct (id, uri, type, createdAt, updatedAt, resourceId, documentId)
+- [x] Implement `read_lk_file()` in `src/lk/io.rs` — open file, GzDecoder, serde_json::from_reader
+- [x] **Integration test**: deserialize every `.lk` file in `tests/reference/`, verify no errors, log resource/calendar counts
+- [x] Fix any deserialization issues discovered by the tests
 
 ## 1.3: World Store (Multi-World + Hot-Reload)
-- [ ] Implement `WorldStore` struct in `src/lk/store.rs` with `Arc<RwLock<HashMap<String, LkRoot>>>` and `PathBuf`
-- [ ] Implement `WorldStore::load(dir)` — scan directory for `.lk` files, read each, key by filename stem
-- [ ] Implement file watcher using `notify` crate — watch worlds directory, reload on add/modify/remove
-- [ ] World name derived from filename stem: `rime.lk` → `"rime"`
-- [ ] Implement `list_worlds()` — return list of loaded world names with resource/calendar counts
-- [ ] Implement `resolve_world(world?)` — if only one world loaded and param omitted, use it; otherwise require param
-- [ ] Implement `list_resources(world, tag, name)` — filter by tag (exact) and/or name (case-insensitive substring)
-- [ ] Implement `get_resource(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name
-- [ ] Implement `get_resource_tree(world, root_id)` — build nested tree from parentId relationships
-- [ ] Implement `search_content(world, query, limit)` — extract plain text from ProseMirror + timeline event names, substring search
-- [ ] Implement `get_calendar(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name
-- [ ] Define `LkError` enum in `src/lk/mod.rs` with variants: WorldNotFound, ResourceNotFound, CalendarNotFound, InvalidInput, Io, Json
+- [x] Implement `WorldStore` struct in `src/lk/store.rs` with `Arc<RwLock<HashMap<String, LkRoot>>>` and `PathBuf`
+- [x] Implement `WorldStore::load(dir)` — scan directory for `.lk` files, read each, key by filename stem
+- [x] Implement file watcher using `notify` crate — watch worlds directory, reload on add/modify/remove
+- [x] World name derived from filename stem: `rime.lk` → `"rime"`
+- [x] Implement `list_worlds()` — return list of loaded world names with resource/calendar counts
+- [x] Implement `resolve_world(world?)` — if only one world loaded and param omitted, use it; otherwise require param
+- [x] Implement `list_resources(world, tag, name)` — filter by tag (exact) and/or name (case-insensitive substring)
+- [x] Implement `get_resource(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name
+- [x] Implement `get_resource_tree(world, root_id)` — build nested tree from parentId relationships
+- [x] Implement `search_content(world, query, limit)` — extract plain text from ProseMirror + timeline event names, substring search
+- [x] Implement `get_calendar(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name
+- [x] Define `LkError` enum in `src/lk/mod.rs` with variants: WorldNotFound, ResourceNotFound, CalendarNotFound, InvalidInput, Io, Json
 
 ## 1.4: ProseMirror-to-Markdown Converter
-- [ ] Define `PmNode` and `PmMark` types in `src/prosemirror/types.rs`
-- [ ] Implement `to_markdown(node: &Value) -> String` in `src/prosemirror/to_markdown.rs`
-- [ ] Handle `doc` node (root container, recurse)
-- [ ] Handle `paragraph` (render children + double newline)
-- [ ] Handle `heading` (# × level + children + double newline)
-- [ ] Handle `text` node with mark wrapping (strong→**, em→*, code→backtick, link→[](), strikethrough→~~, underline→<u>)
-- [ ] Handle `bulletList` / `orderedList` / `listItem` with proper indentation for nesting
-- [ ] Handle `taskList` / `taskItem` (- [ ] / - [x])
-- [ ] Handle `blockquote` (> prefix on each line)
-- [ ] Handle `codeBlock` (``` fenced code block with optional language attr)
-- [ ] Handle `rule` (---)
-- [ ] Handle `hardBreak` (newline)
-- [ ] Handle `table` / `tableRow` / `tableHeader` / `tableCell` (GFM table with | separators and --- header row)
-- [ ] Handle `mention` → `[[attrs.text]]`
-- [ ] Handle `mediaSingle` / `media` → `![](attrs.url)`
-- [ ] Handle `layoutSection` / `layoutColumn` → flatten, render children sequentially
-- [ ] Handle `panel` → blockquote with panelType prefix
-- [ ] Handle `extension` / `bodiedExtension` → render children or extract text attr
-- [ ] Handle unknown nodes → recurse into children silently
-- [ ] Test against actual ProseMirror content from reference `.lk` files
+- [x] Define `PmNode` and `PmMark` types in `src/prosemirror/types.rs`
+- [x] Implement `to_markdown(node: &Value) -> String` in `src/prosemirror/to_markdown.rs`
+- [x] Handle `doc` node (root container, recurse)
+- [x] Handle `paragraph` (render children + double newline)
+- [x] Handle `heading` (# × level + children + double newline)
+- [x] Handle `text` node with mark wrapping (strong→**, em→*, code→backtick, link→[](), strikethrough→~~, underline→<u>)
+- [x] Handle `bulletList` / `orderedList` / `listItem` with proper indentation for nesting
+- [x] Handle `taskList` / `taskItem` (- [ ] / - [x])
+- [x] Handle `blockquote` (> prefix on each line)
+- [x] Handle `codeBlock` (``` fenced code block with optional language attr)
+- [x] Handle `rule` (---)
+- [x] Handle `hardBreak` (newline)
+- [x] Handle `table` / `tableRow` / `tableHeader` / `tableCell` (GFM table with | separators and --- header row)
+- [x] Handle `mention` → `[[attrs.text]]`
+- [x] Handle `mediaSingle` / `media` → `![](attrs.url)`
+- [x] Handle `layoutSection` / `layoutColumn` → flatten, render children sequentially
+- [x] Handle `panel` → blockquote with panelType prefix
+- [x] Handle `extension` / `bodiedExtension` → render children or extract text attr
+- [x] Handle unknown nodes → recurse into children silently
+- [x] Test against actual ProseMirror content from reference `.lk` files
 
 ## 1.5: MCP Server + Read Tools
-- [ ] Implement `LkServer` struct in `src/server.rs` holding WorldStore
-- [ ] Implement `ServerHandler` for `LkServer` with `get_info()` returning server metadata
-- [ ] Wire `list_worlds` tool — calls store, returns world summaries
-- [ ] Wire `list_resources` tool — calls store, returns JSON array of summaries
-- [ ] Wire `get_resource` tool — calls store, converts page content to markdown, renders timeline docs with lane/event summaries
-- [ ] Wire `get_resource_tree` tool — calls store, returns nested JSON tree
-- [ ] Wire `search_content` tool — calls store, returns matching snippets
-- [ ] Wire `get_calendar` tool — calls store, returns calendar definition
-- [ ] Update `main.rs` to create LkServer and start rmcp stdio transport
-- [ ] **Test**: pipe a `tools/list` JSON-RPC request through stdin, verify all 6 tools appear
-- [ ] **Test**: pipe a `tools/call` for `list_worlds`, verify response
+- [x] Implement `LkServer` struct in `src/server.rs` holding WorldStore
+- [x] Implement `ServerHandler` for `LkServer` with `get_info()` returning server metadata
+- [x] Wire `list_worlds` tool — calls store, returns world summaries
+- [x] Wire `list_resources` tool — calls store, returns JSON array of summaries
+- [x] Wire `get_resource` tool — calls store, converts page content to markdown, renders timeline docs with lane/event summaries
+- [x] Wire `get_resource_tree` tool — calls store, returns nested JSON tree
+- [x] Wire `search_content` tool — calls store, returns matching snippets
+- [x] Wire `get_calendar` tool — calls store, returns calendar definition
+- [x] Update `main.rs` to create LkServer and start rmcp stdio transport
+- [x] **Test**: pipe a `tools/list` JSON-RPC request through stdin, verify all 6 tools appear
+- [x] **Test**: pipe a `tools/call` for `list_worlds`, verify response
 
 ## 1.6: Polish & Integration
-- [ ] Add startup logging to stderr (worlds dir, world count, per-world resource/calendar counts)
-- [ ] Log hot-reload events to stderr (file added/modified/removed)
-- [ ] Handle edge cases: empty worlds directory (no .lk files), resource with no documents, empty content
-- [ ] Verify `get_resource` name lookup handles multiple resources with same name gracefully
-- [ ] Verify `get_calendar` returns useful calendar structure
-- [ ] Verify world omission works when only one world loaded
+- [x] Add startup logging to stderr (worlds dir, world count, per-world resource/calendar counts)
+- [x] Log hot-reload events to stderr (file added/modified/removed)
+- [x] Handle edge cases: empty worlds directory (no .lk files), resource with no documents, empty content
+- [x] Verify `get_resource` name lookup handles multiple resources with same name gracefully
+- [x] Verify `get_calendar` returns useful calendar structure
+- [x] Verify world omission works when only one world loaded
 - [ ] Test hot-reload: start server, drop new .lk file in directory, verify `list_worlds` reflects it
 - [ ] Test full flow: configure as MCP server in Claude Code, use tools interactively
 
