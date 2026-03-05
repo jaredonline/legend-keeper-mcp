@@ -47,6 +47,7 @@ pub struct SearchResult {
     pub resource_name: String,
     pub document_name: String,
     pub snippet: String,
+    pub is_hidden: bool,
 }
 
 impl WorldStore {
@@ -350,6 +351,7 @@ impl WorldStore {
                                     resource_name: resource.name.clone(),
                                     document_name: doc.name.clone(),
                                     snippet,
+                                    is_hidden: doc.is_hidden,
                                 });
                             }
                         }
@@ -369,6 +371,7 @@ impl WorldStore {
                                             resource_name: resource.name.clone(),
                                             document_name: doc.name.clone(),
                                             snippet: format!("Timeline event: {}", event.name),
+                                            is_hidden: doc.is_hidden,
                                         });
                                     }
                                 }

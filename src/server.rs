@@ -159,7 +159,8 @@ impl LkServer {
                 )
             })?;
 
-        let text = format_map_document(map_doc, &resource.name);
+        let hidden_tag = if map_doc.is_hidden { " *(hidden)*" } else { "" };
+        let text = format_map_document(map_doc, &resource.name, hidden_tag);
         let mut contents = vec![Content::text(text)];
 
         if let Some(map) = &map_doc.map {
@@ -227,9 +228,6 @@ fn format_resource(resource: &Resource) -> String {
 
     // Properties (skip TAGS/ALIAS since they're shown above)
     for prop in &resource.properties {
-        if prop.is_hidden == Some(true) {
-            continue;
-        }
         if matches!(prop.prop_type.as_str(), "TAGS" | "ALIAS") {
             continue;
         }
@@ -238,7 +236,12 @@ fn format_resource(resource: &Resource) -> String {
             None => continue,
         };
         if !value.is_empty() && value != "{}" {
-            out.push_str(&format!("**{}:** {}\n", prop.title, value));
+            let hidden_tag = if prop.is_hidden == Some(true) {
+                " *(hidden)*"
+            } else {
+                ""
+            };
+            out.push_str(&format!("**{}{}:** {}\n", prop.title, hidden_tag, value));
         }
     }
 
@@ -246,14 +249,12 @@ fn format_resource(resource: &Resource) -> String {
 
     // Documents
     for doc in &resource.documents {
-        if doc.is_hidden {
-            continue;
-        }
+        let hidden_tag = if doc.is_hidden { " *(hidden)*" } else { "" };
 
         match doc.doc_type.as_str() {
             "page" => {
                 if resource.documents.len() > 1 {
-                    out.push_str(&format!("## 📄 {}\n\n", doc.name));
+                    out.push_str(&format!("## 📄 {}{}\n\n", doc.name, hidden_tag));
                 }
                 if let Some(content) = &doc.content {
                     let md = to_markdown(content);
@@ -264,11 +265,11 @@ fn format_resource(resource: &Resource) -> String {
                 }
             }
             "map" => {
-                out.push_str(&format_map_document(doc, &resource.name));
+                out.push_str(&format_map_document(doc, &resource.name, hidden_tag));
                 out.push_str("\n\n");
             }
             "time" => {
-                out.push_str(&format!("## 📅 {}\n\n", doc.name));
+                out.push_str(&format!("## 📅 {}{}\n\n", doc.name, hidden_tag));
                 if let Some(calendar_id) = &doc.calendar_id {
                     out.push_str(&format!("Calendar: {}\n\n", calendar_id));
                 }
@@ -312,9 +313,9 @@ fn extract_resource_id_from_uri(uri: &str) -> Option<&str> {
 }
 
 /// Format a map document with pins, regions, paths, labels, and calibration.
-fn format_map_document(doc: &Document, _resource_name: &str) -> String {
+fn format_map_document(doc: &Document, _resource_name: &str, hidden_tag: &str) -> String {
     let mut out = String::new();
-    out.push_str(&format!("## 🗺️ {}\n\n", doc.name));
+    out.push_str(&format!("## 🗺️ {}{}\n\n", doc.name, hidden_tag));
 
     if let Some(map) = &doc.map {
         out.push_str(&format!("Map image: {}\n", map.map_id));

@@ -7,7 +7,8 @@ A Rust MCP server that provides read access to [Legend Keeper](https://www.legen
 - Load multiple `.lk` world files simultaneously
 - Hot-reload: add, update, or remove `.lk` files while the server is running
 - ProseMirror content rendered as clean markdown
-- Map awareness: pins, regions, paths, labels, and calibration data rendered for spatial reasoning
+- Map awareness: pins, regions, paths, labels, and calibration data with full coordinates for spatial reasoning and distance calculations
+- Visibility-aware: hidden documents and properties are exposed with annotations, letting the LLM distinguish player-visible from DM-only content
 - World instructions: tag a resource `llm-guide` to give Claude world-specific instructions
 - 7 read tools: `list_worlds`, `list_resources`, `get_resource`, `get_resource_tree`, `search_content`, `get_calendar`, `get_map`
 
@@ -78,9 +79,9 @@ Ask Claude about your worlds:
 |------|-------------|
 | `list_worlds` | List loaded worlds with resource/calendar counts. Includes world guide if present. |
 | `list_resources` | List resources, optionally filtered by `tag` or `name` |
-| `get_resource` | Get a resource by ID or name with full markdown content |
+| `get_resource` | Get a resource by ID or name with full markdown content. Hidden documents/properties are included with visibility annotations. |
 | `get_resource_tree` | Get the nested resource hierarchy |
-| `search_content` | Search page text and timeline event names |
+| `search_content` | Search page text and timeline event names. Results include visibility flag. |
 | `get_calendar` | Get a custom calendar definition |
 | `get_map` | Get map data: pins with positions, regions with vertex coordinates, paths with full waypoint coordinates, labels, and calibration. Coordinates enable precise distance/area calculations. |
 

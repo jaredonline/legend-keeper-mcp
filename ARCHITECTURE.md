@@ -173,7 +173,7 @@ MapFeature
 └── curviness: Option<String>
 ```
 
-When rendered, features are grouped by type into tables (pins, regions, paths) and lists (labels). Pin URIs are parsed to extract linked resource IDs. Calibration data from the presentation is included when present to enable distance calculations.
+When rendered, features are grouped by type: pins as a table with positions, regions and paths as lists with full coordinate arrays (enabling precise distance/area calculations), and labels as a simple list. Pin URIs are parsed to extract linked resource IDs. Calibration data from the presentation is included when present to provide the scale factor for real-world distance calculations.
 
 ### Presentation
 
@@ -272,12 +272,12 @@ All tools that operate on a specific world take a `world` parameter (the filenam
 | Method | Input | Output |
 |--------|-------|--------|
 | `list_worlds` | *(none)* | Array of `{name, resourceCount, calendarCount, guide?}` for each loaded world. `guide` contains markdown from the first resource tagged `llm-guide`. |
-| `list_resources` | `world?: String`, `tag?: String`, `name?: String` | JSON array of `{id, name, tags, parentId}` summaries |
-| `get_resource` | `world?: String`, `id_or_name: String` | Resource metadata + each document's content as markdown. Map docs include pins, regions, paths, labels, and calibration. Timeline docs rendered with lane/event summaries. |
+| `list_resources` | `world?: String`, `tag?: String`, `name?: String` | JSON array of `{id, name, tags, parentId, isHidden}` summaries |
+| `get_resource` | `world?: String`, `id_or_name: String` | Resource metadata + each document's content as markdown. Hidden documents and properties are included with `*(hidden)*` annotations so the LLM can reason about visibility. Map docs include pins, regions with vertex coordinates, paths with full waypoint coordinates, labels, and calibration. Timeline docs rendered with lane/event summaries. |
 | `get_resource_tree` | `world?: String`, `root_id?: String` | Nested JSON tree: `{id, name, children: [...]}` |
-| `search_content` | `world?: String`, `query: String`, `limit?: usize` | Array of `{resourceId, resourceName, documentName, snippet}`. Searches pages + timeline event names. |
+| `search_content` | `world?: String`, `query: String`, `limit?: usize` | Array of `{resourceId, resourceName, documentName, snippet, isHidden}`. Searches all pages (including hidden) + timeline event names. |
 | `get_calendar` | `world?: String`, `id_or_name: String` | Calendar definition: month/weekday/era structure |
-| `get_map` | `world?: String`, `id_or_name: String` | Map metadata + pins, regions, paths, labels, and calibration for a resource's map document. Errors if resource has no map. |
+| `get_map` | `world?: String`, `id_or_name: String` | Map metadata + pins with positions, regions with full vertex coordinates, paths with full waypoint coordinates, labels, and calibration for a resource's map document. Coordinates enable precise distance/area calculations. Errors if resource has no map. |
 
 ### Phase 2: Write Tools (5 tools, future)
 
@@ -315,9 +315,9 @@ pub struct WorldStore {
 **Query methods (Phase 1):**
 - `list_worlds()` — return list of loaded world names with resource counts. Includes `guide` field from resources tagged `llm-guide`.
 - `list_resources(world, tag, name)` — filter/iterate resources, return summaries (no document content)
-- `get_resource(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match. Map docs rendered with pins, regions, paths, labels, and calibration.
+- `get_resource(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match. All documents included (hidden ones annotated with `*(hidden)*`). Map docs rendered with full coordinates for pins, regions, and paths.
 - `get_resource_tree(world, root_id)` — build tree from parentId relationships; roots have parentId=None
-- `search_content(world, query, limit)` — iterate all docs, convert ProseMirror to plaintext, case-insensitive substring match, return snippets with context. Also searches timeline event names.
+- `search_content(world, query, limit)` — iterate all docs (including hidden), convert ProseMirror to plaintext, case-insensitive substring match, return snippets with context and `is_hidden` flag. Also searches timeline event names.
 - `get_calendar(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match
 
 **Mutation methods (Phase 2, future):**
