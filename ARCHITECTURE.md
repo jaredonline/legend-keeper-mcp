@@ -2,14 +2,19 @@
 
 ## Overview
 
-A Rust MCP (Model Context Protocol) server that provides read access to local Legend Keeper `.lk` export files. The server watches a directory for `.lk` files, loads them all into memory, and exposes MCP tools for browsing world-building data. When a `.lk` file is added, removed, or modified, the server hot-reloads it.
+A Rust MCP (Model Context Protocol) server that provides read access to Legend Keeper `.lk` export files. The server watches a directory for `.lk` files, loads them all into memory, and exposes MCP tools for browsing world-building data. When a `.lk` file is added, removed, or modified, the server hot-reloads it.
+
+The server operates in two modes:
+- **DM mode** (default): Local stdio transport. All content is visible, with hidden items annotated. For the DM's own use.
+- **Player mode** (`--player`): HTTP transport with bearer-token auth. All hidden content is hard-filtered from memory before serving. For sharing with players over the web.
 
 The user downloads `.lk` exports from Legend Keeper, drops them into the worlds directory (default: `~/.lk-worlds/`), and uses this server to browse/analyze the data with an LLM. The server automatically picks up new or updated files.
 
 ## Project Phases
 
-- **Phase 1 (current):** Read-only. Load `.lk` into memory, expose 7 read tools. No file writes.
-- **Phase 2 (future):** Write tools that produce a new `.lk` file for re-import. Adds `from_markdown.rs`, atomic file writes, ID generation, and 5 write tools.
+- **Phase 1 (current):** Read-only local server. Load `.lk` into memory, expose 7 read tools via stdio. No file writes. DM sees everything including hidden content (annotated).
+- **Phase 2 (next):** Player-view web server. HTTP transport with shared-secret auth. Hard-filters all hidden content (resources, documents, properties) before storing in memory — hidden data never exists in the queryable store. Transitive visibility: if a parent resource is hidden, the entire subtree is removed. Containerized for deployment (EKS or similar).
+- **Phase 3 (future):** Write tools that produce a new `.lk` file for re-import. Adds `from_markdown.rs`, atomic file writes, ID generation, and 5 write tools.
 
 ## The .lk File Format
 
@@ -240,6 +245,11 @@ legend-keeper-mcp/
         └── to_markdown.rs   # ProseMirror -> Markdown converter
 
     # Phase 2 additions:
+    # lk/filter.rs          — visibility filtering (transitive hidden removal)
+    # Dockerfile            — multi-stage build for containerized deployment
+    # docker-compose.yml    — local testing config
+
+    # Phase 3 additions:
     # lk/io.rs              += write_lk_file() — gzip + atomic rename
     # prosemirror/from_markdown.rs — Markdown -> ProseMirror converter (uses comrak)
     # tools/                 — request/response types, read.rs, write.rs
@@ -279,7 +289,27 @@ All tools that operate on a specific world take a `world` parameter (the filenam
 | `get_calendar` | `world?: String`, `id_or_name: String` | Calendar definition: month/weekday/era structure |
 | `get_map` | `world?: String`, `id_or_name: String` | Map metadata + pins with positions, regions with full vertex coordinates, paths with full waypoint coordinates, labels, and calibration for a resource's map document. Coordinates enable precise distance/area calculations. Errors if resource has no map. |
 
-### Phase 2: Write Tools (5 tools, future)
+### Phase 2: Player-View Mode
+
+In player mode (`--player`), the server operates identically to Phase 1 but with two key differences:
+
+1. **Visibility filtering**: All hidden content is removed from memory at load time. The same 7 tools are exposed, but they can only return player-visible data.
+2. **HTTP transport + auth**: Instead of stdio, the server listens on HTTP with `Authorization: Bearer <token>` authentication. Friends connect their own LLM clients (Claude Desktop, ChatGPT, etc.) to the remote URL.
+
+**Filtering rules** (applied after `read_lk_file()`, before storing in WorldStore):
+- Resources with `isHidden: true` → removed entirely
+- Transitive: if a resource is hidden, all descendants (via parentId chain) are removed regardless of their own `isHidden`
+- Documents with `isHidden: true` → removed from their parent resource
+- Properties with `isHidden: true` → removed from their parent resource
+- `resourceCount` updated to reflect filtered count
+
+**Behavioral changes in player mode:**
+- `list_resources` response omits the `isHidden` field (always false, so it's noise)
+- `search_content` response omits the `isHidden` field
+- `get_resource` never emits `*(hidden)*` annotations (there's nothing hidden to annotate)
+- `get_resource_tree` has no gaps — hidden subtrees are fully pruned
+
+### Phase 3: Write Tools (5 tools, future)
 
 | Method | Input | Output |
 |--------|-------|--------|
@@ -309,7 +339,8 @@ pub struct WorldStore {
 - Loads all `.lk` files from the worlds directory on startup
 - Watches directory for file changes (add/remove/modify) and hot-reloads affected worlds
 - World name derived from filename: `rime.lk` → `"rime"`, `siqram.lk` → `"siqram"`
-- `Arc<RwLock>`: In Phase 1, writes only happen during reload. Phase 2 adds mutation via tools.
+- `Arc<RwLock>`: In Phase 1/2, writes only happen during reload. Phase 3 adds mutation via tools.
+- In player mode, `filter_hidden()` is applied after reading each `.lk` file and before inserting into the HashMap. Hidden content never exists in the queryable store.
 - The dataset is small (hundreds of resources per world) — linear scans are fine.
 
 **Query methods (Phase 1):**
@@ -320,7 +351,7 @@ pub struct WorldStore {
 - `search_content(world, query, limit)` — iterate all docs (including hidden), convert ProseMirror to plaintext, case-insensitive substring match, return snippets with context and `is_hidden` flag. Also searches timeline event names.
 - `get_calendar(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match
 
-**Mutation methods (Phase 2, future):**
+**Mutation methods (Phase 3, future):**
 - `create_resource(req)` — generate 8-char ID, create default "Main" document, append to resources, increment resourceCount
 - `update_resource(id, patch)` — find by ID, apply non-None fields
 - `update_document_content(resource_id, doc_id, content, format)` — find doc, parse markdown to ProseMirror (or accept raw), update content and updatedAt
@@ -335,7 +366,7 @@ read_lk_file(path) -> Result<LkRoot>
   Open file → GzDecoder → serde_json::from_reader
 ```
 
-**Phase 2 additions:**
+**Phase 3 additions:**
 ```
 write_lk_file(path, root) -> Result<()>
   Create temp file (path.lk.tmp) → GzEncoder → serde_json::to_writer → fs::rename (atomic)
@@ -387,7 +418,7 @@ Recursive converter. Node type mapping:
 
 **Mark rendering:** Wrap text in `**bold**`, `*italic*`, `` `code` ``, `[text](url)`, `~~strikethrough~~`, etc.
 
-### `src/prosemirror/from_markdown.rs` — Markdown → PM (Phase 2)
+### `src/prosemirror/from_markdown.rs` — Markdown → PM (Phase 3)
 
 Uses `comrak` crate to parse markdown into an AST, then converts each AST node to ProseMirror nodes.
 
@@ -413,9 +444,11 @@ Special handling:
 | `flate2` | 1.x | Gzip decompression (Phase 1); compression added in Phase 2 |
 | `notify` | 7.x | File system watching for hot-reload of .lk files |
 | `sha2` | 0.10.x | SHA-256 hash verification |
-| `comrak` | 0.35.x | Phase 2: CommonMark markdown parsing (for MD → PM) |
-| `chrono` | 0.4.x | Phase 2: ISO 8601 timestamp generation (features: serde) |
-| `rand` | 0.9.x | Phase 2: Random ID generation |
+| `axum` | 0.8.x | Phase 2: HTTP server for player-mode transport |
+| `tower-http` | 0.6.x | Phase 2: HTTP middleware (CORS, auth layer) |
+| `comrak` | 0.35.x | Phase 3: CommonMark markdown parsing (for MD → PM) |
+| `chrono` | 0.4.x | Phase 3: ISO 8601 timestamp generation (features: serde) |
+| `rand` | 0.9.x | Phase 3: Random ID generation |
 
 ---
 
@@ -434,6 +467,12 @@ Domain errors defined in `src/lk/mod.rs`:
 
 **Phase 2 additions:**
 
+| Error | HTTP Code | When |
+|-------|-----------|------|
+| `Unauthorized` | 401 | Missing or invalid bearer token in player mode |
+
+**Phase 3 additions:**
+
 | Error | MCP Code | When |
 |-------|----------|------|
 | `DocumentNotFound(id)` | -32001 | update_document_content with unknown doc ID |
@@ -446,19 +485,28 @@ All `LkError` variants convert to `McpError` via `From` impl at the tool boundar
 
 ## Runtime Configuration
 
-**CLI usage:**
+**CLI usage (DM mode — Phase 1, default):**
 ```
 legend-keeper-mcp [worlds-directory]
 ```
 
+**CLI usage (Player mode — Phase 2):**
+```
+legend-keeper-mcp --player --secret <token> [--port <port>] [worlds-directory]
+```
+
 The worlds directory is resolved in order:
-1. CLI arg 1 (if provided)
+1. CLI argument (positional, if provided)
 2. `LK_WORLDS` env var
 3. Default: `~/.lk-worlds/`
 
+Player mode also accepts environment variables (useful for containerized deployment):
+- `LK_SECRET` — shared secret token (alternative to `--secret`)
+- `LK_PORT` — HTTP port (alternative to `--port`, default: 8080)
+
 Drop `.lk` files into this directory. The server loads all of them on startup and watches for changes.
 
-**Claude Code MCP config** (in `.claude/settings.json` or project config):
+**Claude Code MCP config — local DM mode** (in `.claude/settings.json` or project config):
 ```json
 {
   "mcpServers": {
@@ -481,9 +529,25 @@ Or with a custom directory:
 }
 ```
 
+**Claude Desktop MCP config — remote player mode** (friends connecting to your server):
+```json
+{
+  "mcpServers": {
+    "legend-keeper": {
+      "url": "https://your-server.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <shared-secret>"
+      }
+    }
+  }
+}
+```
+
 ---
 
-## Data Flow (Phase 1)
+## Data Flow
+
+### Phase 1: DM Mode (stdio)
 
 ```
          ~/.lk-worlds/
@@ -497,8 +561,8 @@ Or with a custom directory:
          │     WorldStore      │
          │  HashMap<String,    │
          │    LkRoot>          │
-         │  (hot-reloads on    │
-         │   file changes)     │
+         │  (all content incl. │
+         │   hidden, annotated)│
          └─────────┬───────────┘
                    │
          ┌─────────┤
@@ -512,5 +576,44 @@ Or with a custom directory:
     │   (JSON-RPC)        │
     └─────────────────────┘
          ↕
-    LLM / Claude Code
+    DM's LLM client
+```
+
+### Phase 2: Player Mode (HTTP)
+
+```
+         ~/.lk-worlds/ (or /data/worlds/ in container)
+         ├── rime.lk
+         └── ...
+              │
+              │ file watcher + read_lk_file()
+              ▼
+         ┌─────────────────────┐
+         │   filter_hidden()   │
+         │  remove hidden      │
+         │  resources, docs,   │
+         │  properties +       │
+         │  transitive subtrees│
+         └─────────┬───────────┘
+                   ▼
+         ┌─────────────────────┐
+         │     WorldStore      │
+         │  (player_mode=true) │
+         │  only visible data  │
+         │  exists in memory   │
+         └─────────┬───────────┘
+                   │
+         ┌─────────┤
+         │         │
+    Read tools  ProseMirror
+    (7 tools)   → Markdown
+         │
+         ▼
+    ┌─────────────────────┐
+    │   HTTP transport     │
+    │   Bearer token auth  │
+    │   (JSON-RPC over HTTP)│
+    └─────────────────────┘
+         ↕ (HTTPS via ingress)
+    Friends' LLM clients
 ```

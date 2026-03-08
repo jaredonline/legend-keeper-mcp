@@ -114,16 +114,74 @@
 
 ---
 
-# Phase 2: Write Tools (Future)
+# Phase 2: Player-View Web Server
 
-## 2.1: File Output
-- [ ] Add Phase 2 dependencies to Cargo.toml (comrak, chrono, rand)
+## 2.1: Visibility Filtering
+- [ ] Implement `filter_hidden()` in `src/lk/filter.rs` — takes `LkRoot`, returns filtered `LkRoot`
+- [ ] Build set of hidden resource IDs: any resource with `isHidden: true`
+- [ ] Compute transitive hidden set: walk parentId chains — if a parent is hidden, all descendants are hidden regardless of their own `isHidden`
+- [ ] Remove all hidden resources from the filtered `LkRoot.resources`
+- [ ] Remove hidden documents (`isHidden: true`) from remaining visible resources
+- [ ] Remove hidden properties (`isHidden: true`) from remaining visible resources
+- [ ] Update `resourceCount` to reflect filtered count
+- [ ] **Test**: load reference `.lk`, mark a root resource hidden, verify its children are also removed
+- [ ] **Test**: verify a visible resource's hidden document is stripped but the resource remains
+- [ ] **Test**: verify a visible resource's hidden property is stripped but the resource remains
+
+## 2.2: Player-Mode WorldStore
+- [ ] Add `player_mode: bool` field to `WorldStore`
+- [ ] When `player_mode` is true, apply `filter_hidden()` after `read_lk_file()` before storing in the HashMap
+- [ ] Apply the same filter on hot-reload
+- [ ] Remove `*(hidden)*` annotations from server.rs output in player mode (they should never appear since hidden content is gone)
+- [ ] Remove `isHidden` field from `list_resources` and `search_content` responses in player mode (always false)
+- [ ] **Test**: load a world in player mode, verify `list_resources` returns no hidden resources
+- [ ] **Test**: verify `search_content` returns no results from hidden documents
+- [ ] **Test**: verify `get_resource_tree` has no gaps — hidden subtrees are fully removed
+
+## 2.3: HTTP Transport + Auth
+- [ ] Add Phase 2 dependencies to Cargo.toml (axum, tower-http, or rmcp streamable-http transport)
+- [ ] Research rmcp's streamable HTTP server support — determine if it handles HTTP natively or if we need axum
+- [ ] Implement shared-secret auth: check `Authorization: Bearer <token>` header on every request
+- [ ] Reject requests with missing/invalid token with 401 Unauthorized
+- [ ] Add CLI flags: `--player` (enable player mode + HTTP), `--secret <token>`, `--port <port>` (default 8080)
+- [ ] When `--player` is set: skip stdio transport, start HTTP transport instead
+- [ ] When `--player` is set without `--secret`: refuse to start (require auth for web-exposed server)
+- [ ] Log auth failures to stderr (but don't log the token itself)
+- [ ] **Test**: start server with `--player --secret test123 --port 0`, send authenticated request, verify 200
+- [ ] **Test**: send request without token, verify 401
+- [ ] **Test**: send request with wrong token, verify 401
+
+## 2.4: Containerization & Deployment
+- [ ] Create `Dockerfile` — multi-stage build (rust builder → minimal runtime image)
+- [ ] Binary runs as non-root user in container
+- [ ] Worlds directory mounted as a volume (default: `/data/worlds/`)
+- [ ] `LK_SECRET` env var as alternative to `--secret` flag (for k8s secrets)
+- [ ] `LK_PORT` env var as alternative to `--port` flag
+- [ ] Create basic `docker-compose.yml` for local testing
+- [ ] Document EKS deployment: container image, PersistentVolume for worlds, k8s Secret for token, Service/Ingress for HTTPS
+- [ ] **Test**: `docker build` succeeds
+- [ ] **Test**: `docker run` with a mounted `.lk` file, verify tools respond over HTTP
+
+## 2.5: Polish & Integration
+- [ ] Update README with player-mode setup instructions
+- [ ] Document how friends configure Claude Desktop / ChatGPT to connect to the remote MCP server
+- [ ] Add health check endpoint (GET `/health` → 200 OK, no auth required)
+- [ ] Add startup banner to stderr: mode (DM/player), transport (stdio/HTTP), port, world count
+- [ ] Verify hot-reload works in player mode (new .lk file picked up, filtered, served)
+- [ ] **Test**: end-to-end — friend configures Claude Desktop with remote URL + token, queries world data, sees only player-visible content
+
+---
+
+# Phase 3: Write Tools (Future)
+
+## 3.1: File Output
+- [ ] Add Phase 3 dependencies to Cargo.toml (comrak, chrono, rand)
 - [ ] Implement `write_lk_file()` in `src/lk/io.rs` — temp file, GzEncoder, serde_json::to_writer, fs::rename
 - [ ] Implement hash recomputation (SHA-256 of compact JSON resources array)
 - [ ] **Roundtrip test**: read each `.lk` in `tests/reference/`, write to temp, read back, compare all fields (except hash)
 - [ ] Decide output path strategy (separate from source .lk)
 
-## 2.2: Markdown-to-ProseMirror Converter
+## 3.2: Markdown-to-ProseMirror Converter
 - [ ] Implement `from_markdown(md: &str, resources: &[Resource]) -> Value` in `src/prosemirror/from_markdown.rs`
 - [ ] Use `comrak` to parse markdown into AST
 - [ ] Convert comrak paragraph → PM paragraph
@@ -140,7 +198,7 @@
 - [ ] Convert comrak task list items → PM taskList + taskItem with state attr
 - [ ] Handle comrak softbreak/linebreak → PM hardBreak
 
-## 2.3: Write Tools (MCP Wiring)
+## 3.3: Write Tools (MCP Wiring)
 - [ ] Create `src/tools/` module with request/response types
 - [ ] Implement `generate_id()` — 8-char lowercase alphanumeric random string
 - [ ] Wire `create_resource` tool — parse optional markdown content, call store, return created resource

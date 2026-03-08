@@ -19,7 +19,7 @@ LLMs work best with markdown. All document content exposed through read tools is
 - **Parse**: Accept any valid JSON structure. Use `Option<T>` and `#[serde(default)]` liberally. A missing field should not crash the server.
 - **Serialize**: Produce the exact camelCase field names Legend Keeper expects. Validate with `#[serde(rename_all = "camelCase")]`.
 
-## 4. Atomic Persistence (Phase 2)
+## 4. Atomic Persistence (Phase 3)
 
 Every write operation must leave the .lk file in a consistent state. Write to a temp file first, then `fs::rename`. Never write directly to the target file — a crash mid-write would corrupt it. Write output goes to a separate file — the source `.lk` is never modified.
 
@@ -39,7 +39,8 @@ Only add crates that earn their weight:
 - `tokio` — rmcp requires async
 - `sha2` — hash verification
 - `notify` — file watching for hot-reload
-- Phase 2: `comrak` (markdown parsing), `chrono` (timestamps), `rand` (ID generation)
+- Phase 2: `axum` (HTTP server), `tower-http` (middleware/auth)
+- Phase 3: `comrak` (markdown parsing), `chrono` (timestamps), `rand` (ID generation)
 
 Avoid: ORMs, web frameworks, logging frameworks (use `eprintln!`), config file parsers.
 
@@ -48,13 +49,14 @@ Avoid: ORMs, web frameworks, logging frameworks (use `eprintln!`), config file p
 - If the worlds directory can't be created or accessed → panic with a clear error message at startup
 - If a `.lk` file can't be parsed during hot-reload → log error to stderr, skip that file, keep serving other worlds
 - If a tool receives bad input at runtime → return a structured MCP error, never panic
-- Phase 2: If a write fails → return error, do not leave partial state
+- Phase 2: If auth fails → return 401, never leak hidden content in error messages
+- Phase 3: If a write fails → return error, do not leave partial state
 
-## 8. IDs Match Legend Keeper's Format (Phase 2)
+## 8. IDs Match Legend Keeper's Format (Phase 3)
 
 Generated IDs must be 8-character lowercase alphanumeric strings (e.g., `a7pjf5dj`), matching the format observed in the reference data. This ensures compatibility when the file is re-imported into Legend Keeper.
 
-## 9. Preserve Ordering (Phase 2)
+## 9. Preserve Ordering (Phase 3)
 
 Resources, documents, and properties each have a `pos` field for ordering. Maintain existing `pos` values. For new items, assign a `pos` that sorts after existing siblings (simple string like `"z"` or lexicographic midpoint).
 
@@ -64,8 +66,8 @@ The MCP stdio transport uses stdout for JSON-RPC. All diagnostic output (startup
 
 ## 11. Convention Over Configuration
 
-- No config files. The only input is the worlds directory path (default: `~/.lk-worlds/`).
-- No feature flags. All tools are always available.
+- No config files. Inputs are the worlds directory path (default: `~/.lk-worlds/`) and CLI flags / env vars.
+- No feature flags. All tools are always available (the tool set is the same in DM and player mode — only the data changes).
 - No plugins. The tool set is fixed at compile time.
 
 ## 12. World-Level Conventions via Tags
@@ -76,10 +78,20 @@ Special behavior is driven by resource tags rather than names or config files. C
 
 This pattern keeps configuration inside the world data (no external config files) and is discoverable via `list_resources` with a tag filter.
 
-## 13. Expose Document Traits, Don't Filter
+## 13. Expose Document Traits, Don't Filter (DM Mode)
 
-Document and property metadata (visibility, type, name, etc.) should be exposed to the LLM as inline annotations rather than used to filter content. The LLM needs these traits to make intelligent decisions — e.g., distinguishing player-visible content from hidden DM notes — but the server should never silently hide data. Mark it (e.g., `*(hidden)*`), don't suppress it.
+In DM mode, document and property metadata (visibility, type, name, etc.) should be exposed to the LLM as inline annotations rather than used to filter content. The LLM needs these traits to make intelligent decisions — e.g., distinguishing player-visible content from hidden DM notes — but the server should never silently hide data. Mark it (e.g., `*(hidden)*`), don't suppress it.
 
-## 14. Test Against Real Data
+## 14. Hard Filter in Player Mode — No Exceptions
+
+In player mode, hidden content must be removed from memory entirely. This is a security boundary, not a presentation choice. The filtering happens at load time (after deserialization, before storing in WorldStore), so hidden data never exists in the queryable store and cannot be leaked through any tool, error message, or side channel. The rules are:
+
+- `Resource.isHidden: true` → resource and its entire descendant subtree removed (transitive via parentId)
+- `Document.isHidden: true` → document removed from its parent resource
+- `Property.isHidden: true` → property removed from its parent resource
+
+No tag-based filtering. No permission-based filtering. Only the `isHidden` fields at the resource, document, and property level.
+
+## 15. Test Against Real Data
 
 Reference `.lk` files live in `tests/reference/` (gitignored). Currently: `rime.lk` (124 resources, no custom calendars) and `siqram.lk` (296 resources, 1 custom calendar with timelines). Integration tests deserialize every `.lk` file in that directory. When Legend Keeper updates their format, drop a fresh export in `tests/reference/`, run `cargo test`, and fix whatever breaks.

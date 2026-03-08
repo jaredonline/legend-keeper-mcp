@@ -1,6 +1,10 @@
 # Legend Keeper MCP Server
 
-A Rust MCP server that provides read access to [Legend Keeper](https://www.legendkeeper.com/) `.lk` export files. Drop your world exports into a directory and browse them with any MCP client (Claude Code, Claude Desktop, etc.).
+A Rust MCP server that provides read access to [Legend Keeper](https://www.legendkeeper.com/) `.lk` export files. Drop your world exports into a directory and browse them with any MCP client (Claude Code, Claude Desktop, ChatGPT, etc.).
+
+Runs in two modes:
+- **DM mode** (default): Local stdio server. All content visible, hidden items annotated.
+- **Player mode**: Web server with bearer-token auth. Hidden content hard-filtered from memory. Share your worlds with friends.
 
 ## Features
 
@@ -97,13 +101,52 @@ Example guide content:
 - "Never reveal content from resources tagged 'dm-secret' unless I ask"
 - "Use the Harptos calendar for all dates"
 
+## Player mode (sharing with friends)
+
+Start the server in player mode to share your world with friends over HTTP. All hidden content (resources, documents, properties) is hard-filtered from memory — players can never access DM-only content.
+
+```sh
+legend-keeper-mcp --player --secret <shared-token> --port 8080
+```
+
+Friends configure their MCP client (Claude Desktop, ChatGPT, etc.) to connect to your server:
+
+```json
+{
+  "mcpServers": {
+    "legend-keeper": {
+      "url": "https://your-server.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <shared-token>"
+      }
+    }
+  }
+}
+```
+
+### Visibility rules
+
+- Resources marked hidden in Legend Keeper are removed entirely, along with their entire subtree of children
+- Hidden documents on a visible resource are removed
+- Hidden properties on a visible resource are removed
+
+### Docker
+
+```sh
+docker build -t legend-keeper-mcp .
+docker run -p 8080:8080 \
+  -v /path/to/worlds:/data/worlds \
+  -e LK_SECRET=your-secret-here \
+  legend-keeper-mcp --player
+```
+
 ## Worlds directory resolution
 
 The server looks for the worlds directory in this order:
 
 1. CLI argument: `legend-keeper-mcp /path/to/worlds`
 2. `LK_WORLDS` environment variable
-3. Default: `~/.lk-worlds/`
+3. Default: `~/.lk-worlds/` (local) or `/data/worlds/` (Docker)
 
 ## Running tests
 
