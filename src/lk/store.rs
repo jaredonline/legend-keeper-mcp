@@ -6,9 +6,22 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::Value;
 
 use super::io::read_lk_file;
-use super::schema::{Calendar, LkRoot, Resource, TimelineContent};
+use super::schema::{Calendar, LkRoot, Property, Resource, TimelineContent};
 use super::LkError;
 use crate::prosemirror::to_markdown::to_markdown;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TemplateSummary {
+    pub name: String,
+    pub tags: Vec<String>,
+    pub properties: Vec<TemplatePropertySummary>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TemplatePropertySummary {
+    pub prop_type: String,
+    pub title: String,
+}
 
 #[derive(Clone)]
 pub struct WorldStore {
@@ -406,6 +419,96 @@ impl WorldStore {
             .find(|c| c.name.to_lowercase() == lower)
             .cloned()
             .ok_or_else(|| LkError::CalendarNotFound(id_or_name.to_string()))
+    }
+
+    /// Extract templates from a world. Templates are resources under the "templates" parent chain.
+    pub fn list_templates(
+        &self,
+        world: &Option<String>,
+    ) -> Result<Vec<TemplateSummary>, LkError> {
+        let worlds = self.worlds.read().unwrap();
+        let (_, root) = Self::resolve_world(&worlds, world)?;
+        let templates = Self::extract_templates(root);
+        Ok(templates
+            .iter()
+            .map(|r| TemplateSummary {
+                name: r.name.clone(),
+                tags: r.tags.clone(),
+                properties: r
+                    .properties
+                    .iter()
+                    .map(|p| TemplatePropertySummary {
+                        prop_type: p.prop_type.clone(),
+                        title: p.title.clone(),
+                    })
+                    .collect(),
+            })
+            .collect())
+    }
+
+    /// Get the full property list for a template by name, with fresh IDs generated for each property.
+    pub fn get_template_properties(
+        &self,
+        world: &Option<String>,
+        template_name: &str,
+    ) -> Result<(Vec<Property>, Vec<String>), LkError> {
+        let worlds = self.worlds.read().unwrap();
+        let (_, root) = Self::resolve_world(&worlds, world)?;
+        let templates = Self::extract_templates(root);
+        let lower = template_name.to_lowercase();
+        let template = templates
+            .iter()
+            .find(|r| r.name.to_lowercase() == lower)
+            .ok_or_else(|| {
+                LkError::InvalidInput(format!("Template '{}' not found", template_name))
+            })?;
+
+        use crate::lk::io::generate_id;
+
+        let properties: Vec<Property> = template
+            .properties
+            .iter()
+            .map(|p| Property {
+                id: generate_id(),
+                pos: p.pos.clone(),
+                prop_type: p.prop_type.clone(),
+                title: p.title.clone(),
+                is_hidden: p.is_hidden,
+                is_title_hidden: p.is_title_hidden,
+                data: p.data.clone(),
+            })
+            .collect();
+
+        Ok((properties, template.tags.clone()))
+    }
+
+    /// Find all template resources by walking the parentId chain looking for id == "templates".
+    fn extract_templates(root: &LkRoot) -> Vec<&Resource> {
+        // Build a set of resource IDs that are in the templates hierarchy.
+        // The "templates" parent ID is a special sentinel — resources whose parentId chain
+        // includes a resource with id "templates" are part of the template system.
+        // In practice, the "Default Templates" resource has parentId: "templates",
+        // and individual templates are children of that resource.
+
+        // Find the "Default Templates" resource (direct child of "templates" parent)
+        let template_folder_ids: Vec<&str> = root
+            .resources
+            .iter()
+            .filter(|r| r.parent_id.as_deref() == Some("templates"))
+            .map(|r| r.id.as_str())
+            .collect();
+
+        // Find all children of those template folders — these are the actual templates
+        root.resources
+            .iter()
+            .filter(|r| {
+                if let Some(pid) = &r.parent_id {
+                    template_folder_ids.contains(&pid.as_str())
+                } else {
+                    false
+                }
+            })
+            .collect()
     }
 
     pub async fn fetch_image(url: &str) -> Result<(Vec<u8>, String), LkError> {

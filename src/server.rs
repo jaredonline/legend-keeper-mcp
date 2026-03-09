@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::Parameters;
@@ -7,6 +8,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::lk::builder::WorldBuilder;
 use crate::lk::schema::{Document, MapContent, Resource, TimelineContent};
 use crate::lk::store::WorldStore;
 use crate::prosemirror::to_markdown::to_markdown;
@@ -14,6 +16,7 @@ use crate::prosemirror::to_markdown::to_markdown;
 #[derive(Clone)]
 pub struct LkServer {
     store: WorldStore,
+    builder: Arc<Mutex<Option<WorldBuilder>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -74,6 +77,73 @@ pub struct GetCalendarParams {
     pub id_or_name: String,
 }
 
+// --- Generation parameter types ---
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateWorldParams {
+    /// Name for the new world.
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateResourceParams {
+    /// Resource name.
+    pub name: String,
+    /// Parent resource ID. Omit for a top-level resource.
+    pub parent_id: Option<String>,
+    /// Tags for the resource.
+    pub tags: Option<Vec<String>>,
+    /// Markdown content for the resource's main page document.
+    pub content: Option<String>,
+    /// Mark this resource as hidden (DM-only). Defaults to false.
+    pub is_hidden: Option<bool>,
+    /// Template name to apply (e.g. "NPC", "Location"). Use list_templates to see available templates. Copies property blocks from the template.
+    pub template: Option<String>,
+    /// Alternative names for this resource.
+    pub aliases: Option<Vec<String>>,
+    /// World to source the template from. Only needed if multiple worlds are loaded.
+    pub template_world: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListTemplatesParams {
+    /// World to list templates from. If only one world is loaded, this can be omitted.
+    pub world: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AddDocumentParams {
+    /// Resource ID to add the document to.
+    pub resource_id: String,
+    /// Document name (e.g. "DM Notes", "History").
+    pub name: String,
+    /// Markdown content for the document.
+    pub content: String,
+    /// Document type: "page" (default), "map", or "time".
+    pub doc_type: Option<String>,
+    /// Mark this document as hidden (DM-only). Defaults to false.
+    pub is_hidden: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetContentParams {
+    /// Resource ID.
+    pub resource_id: String,
+    /// Document ID. If omitted, updates the first page document.
+    pub document_id: Option<String>,
+    /// Markdown content.
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListDraftParams {}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportWorldParams {
+    /// Output file path. Defaults to ~/.lk-worlds/exports/{name}.lk
+    pub output_path: Option<String>,
+}
+
 // --- Tool implementations ---
 
 #[tool_router]
@@ -81,6 +151,7 @@ impl LkServer {
     pub fn new(store: WorldStore) -> Self {
         Self {
             store,
+            builder: Arc::new(Mutex::new(None)),
             tool_router: Self::tool_router(),
         }
     }
@@ -196,13 +267,136 @@ impl LkServer {
             .map_err(|e| e.to_string())?;
         serde_json::to_string_pretty(&calendar).map_err(|e| e.to_string())
     }
+
+    // --- Generation tools ---
+
+    #[tool(description = "Create a new world for generation. Only one world can be built at a time. Call export_world when done to produce a .lk file.")]
+    async fn create_world(
+        &self,
+        Parameters(params): Parameters<CreateWorldParams>,
+    ) -> Result<String, String> {
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+        *builder = Some(WorldBuilder::new(&params.name));
+        Ok(format!("Created draft world: {}", params.name))
+    }
+
+    #[tool(description = "List available resource templates from loaded worlds. Templates define property blocks (IMAGE, FRIENDS, ENEMIES, TAGS, etc.) that are copied onto new resources. Use list_templates before create_resource to pick the right template.")]
+    async fn list_templates(
+        &self,
+        Parameters(params): Parameters<ListTemplatesParams>,
+    ) -> Result<String, String> {
+        let templates = self
+            .store
+            .list_templates(&params.world)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&templates).map_err(|e| e.to_string())
+    }
+
+    #[tool(description = "Create a resource in the draft world. Provide markdown content for the main page document. Use the 'template' param to apply property blocks from a template (call list_templates first). Returns the resource ID for use as parent_id in child resources.")]
+    async fn create_resource(
+        &self,
+        Parameters(params): Parameters<CreateResourceParams>,
+    ) -> Result<String, String> {
+        // If a template is specified, look it up from the WorldStore
+        let template_props = if let Some(ref template_name) = params.template {
+            let (props, template_tags) = self
+                .store
+                .get_template_properties(&params.template_world, template_name)
+                .map_err(|e| e.to_string())?;
+            Some((props, template_tags))
+        } else {
+            None
+        };
+
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+        let b = builder.as_mut().ok_or_else(|| "No draft world — call create_world first".to_string())?;
+
+        // Merge tags: explicit tags + template tags (deduped)
+        let mut tags = params.tags.unwrap_or_default();
+        if let Some((_, ref template_tags)) = template_props {
+            for t in template_tags {
+                if !tags.iter().any(|existing| existing.eq_ignore_ascii_case(t)) {
+                    tags.push(t.clone());
+                }
+            }
+        }
+
+        let summary = b
+            .create_resource(
+                &params.name,
+                params.parent_id.as_deref(),
+                Some(tags),
+                params.content.as_deref(),
+                params.is_hidden.unwrap_or(false),
+                params.aliases.unwrap_or_default(),
+                template_props.map(|(props, _)| props).unwrap_or_default(),
+            )
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
+    }
+
+    #[tool(description = "Add an additional document to a resource in the draft world. Use this for secondary pages like 'DM Notes' or 'History'.")]
+    async fn add_document(
+        &self,
+        Parameters(params): Parameters<AddDocumentParams>,
+    ) -> Result<String, String> {
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+        let b = builder.as_mut().ok_or_else(|| "No draft world — call create_world first".to_string())?;
+        let summary = b
+            .add_document(
+                &params.resource_id,
+                &params.name,
+                &params.content,
+                params.doc_type.as_deref(),
+                params.is_hidden.unwrap_or(false),
+            )
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
+    }
+
+    #[tool(description = "Update the content of a document in the draft world. If document_id is omitted, updates the first page document of the resource.")]
+    async fn set_content(
+        &self,
+        Parameters(params): Parameters<SetContentParams>,
+    ) -> Result<String, String> {
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+        let b = builder.as_mut().ok_or_else(|| "No draft world — call create_world first".to_string())?;
+        b.set_content(
+            &params.resource_id,
+            params.document_id.as_deref(),
+            &params.content,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok("Content updated".to_string())
+    }
+
+    #[tool(description = "List all resources in the draft world. Shows the current state of the world being built.")]
+    async fn list_draft(&self, _params: Parameters<ListDraftParams>) -> Result<String, String> {
+        let builder = self.builder.lock().map_err(|e| e.to_string())?;
+        let b = builder.as_ref().ok_or_else(|| "No draft world — call create_world first".to_string())?;
+        let summary = b.list_draft();
+        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
+    }
+
+    #[tool(description = "Export the draft world as a .lk file. Returns the file path. The file can be imported into Legend Keeper.")]
+    async fn export_world(
+        &self,
+        Parameters(params): Parameters<ExportWorldParams>,
+    ) -> Result<String, String> {
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+        let b = builder.as_mut().ok_or_else(|| "No draft world — call create_world first".to_string())?;
+        let path = b
+            .export_world(params.output_path.as_deref())
+            .map_err(|e| e.to_string())?;
+        Ok(format!("Exported to: {}", path.display()))
+    }
 }
 
 #[tool_handler]
 impl ServerHandler for LkServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            instructions: Some("Legend Keeper MCP server. Provides read access to .lk world-building files. Use list_worlds to see available worlds, then browse resources, search content, and view calendars.".to_string()),
+            instructions: Some("Legend Keeper MCP server. Provides read access to .lk world-building files. Use list_worlds to see available worlds, then browse resources, search content, and view calendars. You can also generate new worlds: call list_templates first to see available templates (NPC, Location, etc.), then use create_world to start, create_resource with a template to add content with proper property blocks, and export_world to produce a .lk file for import into Legend Keeper.".to_string()),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..ServerInfo::default()
         }

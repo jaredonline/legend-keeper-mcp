@@ -20,6 +20,7 @@ pub struct Resource {
     pub schema_version: u32,
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
     pub pos: String,
     pub created_by: String,
@@ -29,8 +30,11 @@ pub struct Resource {
     pub is_locked: bool,
     #[serde(default)]
     pub show_property_bar: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_glyph: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_shape: Option<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
@@ -56,6 +60,7 @@ pub struct Document {
     pub is_hidden: bool,
     #[serde(default)]
     pub is_first: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub is_full_width: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
@@ -63,9 +68,13 @@ pub struct Document {
     pub transforms: Vec<Value>,
     #[serde(default)]
     pub sources: Vec<Source>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation: Option<Presentation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub map: Option<MapData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar_id: Option<String>,
 }
 
@@ -77,10 +86,11 @@ pub struct Property {
     #[serde(rename = "type")]
     pub prop_type: String,
     pub title: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_hidden: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_title_hidden: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 }
 
@@ -142,9 +152,9 @@ pub struct Month {
     #[serde(default)]
     pub is_intercalary: bool,
     pub length: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<i32>,
 }
 
@@ -163,7 +173,9 @@ pub struct Era {
     pub abbr: String,
     #[serde(default)]
     pub hide_abbr: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub starts_at: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_mode: Option<String>,
 }
 
@@ -183,35 +195,57 @@ pub struct MapFeature {
     pub id: String,
     pub name: String,
     pub pos: [f64; 2],
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub feature_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rank: Option<String>,
     #[serde(default)]
     pub is_synced: bool,
     // Pin fields
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_glyph: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_shape: Option<String>,
     // Region fields
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub polygon: Option<Vec<[f64; 2]>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_opacity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_visibility: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label_visibility: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub border_style: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fill_style: Option<String>,
     // Label fields
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color_a: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color_b: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label_style: Option<Value>,
     // Path fields
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub polyline: Option<Vec<[f64; 2]>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke_width: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke_style: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stroke_opacity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub curviness: Option<String>,
 }
 
@@ -248,17 +282,25 @@ pub struct TimelineEvent {
     #[serde(rename = "type")]
     pub event_type: String,
     pub pos: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<Value>,
     pub start: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub end: Option<i64>,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_glyph: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub image_fit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     #[serde(default)]
     pub is_synced: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 }
 
@@ -279,8 +321,11 @@ pub struct Source {
 #[serde(rename_all = "camelCase")]
 pub struct Presentation {
     pub document_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub calibration: Option<Calibration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub disallowed_modes: Option<Vec<String>>,
 }
 

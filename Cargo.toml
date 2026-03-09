@@ -16,6 +16,9 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 base64 = "0.22"
+comrak = "0.35"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

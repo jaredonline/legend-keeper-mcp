@@ -114,9 +114,91 @@
 
 ---
 
-# Phase 2: Player-View Web Server
+# Phase 2: World Generation (.lk File Export)
 
-## 2.1: Visibility Filtering
+## 2.1: File Output
+- [x] Add Phase 2 dependencies to Cargo.toml (comrak, chrono, rand)
+- [x] Implement `write_lk_file()` in `src/lk/io.rs` — GzEncoder, serde_json::to_writer, write to output path
+- [x] Implement hash computation (SHA-256 of compact JSON resources array)
+- [x] Implement `generate_id()` — 8-char lowercase alphanumeric random string
+- [x] **Test**: write a minimal LkRoot to `.lk`, read it back, verify all fields survive
+
+## 2.2: Markdown-to-ProseMirror Converter
+- [x] Implement `from_markdown(md: &str, resources: &[Resource]) -> Value` in `src/prosemirror/from_markdown.rs`
+- [x] Use `comrak` to parse markdown into AST
+- [x] Convert comrak paragraph → PM paragraph
+- [x] Convert comrak heading → PM heading with level attr
+- [x] Convert comrak list → PM bulletList/orderedList + listItem
+- [x] Convert comrak table → PM table + tableRow + tableHeader/tableCell
+- [x] Convert comrak blockquote → PM blockquote
+- [x] Convert comrak thematic break → PM rule
+- [x] Convert comrak image → PM mediaSingle + media with external type
+- [x] Convert comrak link → PM text with link mark
+- [x] Convert comrak emphasis/strong → PM text with em/strong marks
+- [x] Convert comrak code/code_block → PM text with code mark / codeBlock node
+- [x] Detect `[[Resource Name]]` in text → split into text + PM mention node (resolve name→ID from resources list) + text
+- [x] Convert comrak task list items → PM taskList + taskItem with state attr
+- [x] Handle comrak softbreak/linebreak → PM hardBreak
+- [ ] **Test**: round-trip — take ProseMirror from reference `.lk`, convert to markdown, convert back, verify structural equivalence
+
+## 2.3: WorldBuilder
+- [x] Implement `WorldBuilder` struct in `src/lk/builder.rs` — holds an in-progress `LkRoot` in memory
+- [x] `WorldBuilder::new(name)` — create empty world with generated exportId, version=1, empty resources/calendars
+- [x] `create_resource(name, parent_id?, tags?, content?)` — generate ID, create default "Main" page document, convert markdown content to ProseMirror if provided, assign pos, append to resources
+- [x] `add_document(resource_id, name, content, type?)` — add a page/map/timeline document to an existing resource, generate ID, convert markdown content
+- [x] `set_content(resource_id, document_id?, content)` — update content of existing document (default: first page doc), convert markdown to ProseMirror
+- [x] `list_draft_resources()` — return summary of resources in the in-progress world (so the LLM can see what it's built so far)
+- [x] `export_world(output_path?)` — finalize: set exportedAt, compute resourceCount, compute hash, call `write_lk_file()`, return file path
+- [x] Default output directory: `~/.lk-worlds/exports/` (created if needed)
+- [x] Output filename: `{world_name}.lk`
+- [x] **Test**: create a world with 3 resources in a hierarchy, export, read back, verify structure
+- [x] **Test**: create resource with markdown content, export, verify ProseMirror content is valid
+
+## 2.4: Generation Tools (MCP Wiring)
+- [x] Wire `create_world` tool — creates a new WorldBuilder session, returns world name
+- [x] Wire `create_resource` tool — calls builder, returns created resource summary (id, name)
+- [x] Wire `add_document` tool — calls builder, returns document summary
+- [x] Wire `set_content` tool — calls builder, returns confirmation
+- [x] Wire `list_draft` tool — calls builder, returns summary of in-progress world
+- [x] Wire `export_world` tool — calls builder, writes `.lk` file, returns file path for download
+- [x] Only one world can be built at a time per server session (simplicity — no need for multi-session)
+- [x] Add LkError variants: NoDraftWorld, DraftResourceNotFound, DraftDocumentNotFound
+- [x] **Test**: full flow via MCP — create_world, create_resource ×3, set_content, export_world, verify file exists and is valid
+- [ ] **Test**: export_world without create_world returns clear error
+- [ ] **Test**: create_resource without create_world returns clear error
+
+## 2.5: Visibility Support
+- [x] Add optional `is_hidden: Option<bool>` parameter to `CreateResourceParams` — defaults to false if omitted
+- [x] Add optional `is_hidden: Option<bool>` parameter to `AddDocumentParams` — defaults to false if omitted
+- [x] Pass `is_hidden` through `WorldBuilder::create_resource()` → sets `Resource.is_hidden`
+- [x] Pass `is_hidden` through `WorldBuilder::add_document()` → sets `Document.is_hidden`
+- [x] **Test**: create a hidden resource, export, verify `is_hidden: true` in the `.lk` file
+- [x] **Test**: add a hidden document to a visible resource, export, verify document has `is_hidden: true`
+
+## 2.6: Template Support
+- [x] Implement `extract_templates()` in `store.rs` — find resources under the `parentId: "templates"` chain, return template name → property list mapping
+- [x] Add `list_templates` tool — returns available template names with their property block summaries (type + title) from loaded worlds
+- [x] Add optional `template: Option<String>` param to `CreateResourceParams`
+- [x] When `template` is specified in `create_resource`, look up the template from the WorldStore, clone its properties (with fresh IDs), and apply them to the new resource
+- [x] Also apply the template's tags to the resource (merged with any explicitly provided tags)
+- [x] Add optional `aliases: Option<Vec<String>>` param to `CreateResourceParams` — sets `Resource.aliases`
+- [x] **Test**: extract templates from reference `.lk` files, verify NPC/Location/Character templates are found with correct property blocks
+- [x] **Test**: create a resource with `template: "NPC"`, export, verify properties match the NPC template (IMAGE, FRIENDS, ENEMIES, etc.)
+- [x] **Test**: create a resource with `template: "NPC"` and explicit tags, verify tags are merged (template tags + explicit tags)
+- [x] **Test**: `list_templates` via MCP returns template names
+
+## 2.7: Polish & Integration
+- [x] Update README with world generation instructions
+- [x] Add server instructions mentioning generation tools to the LLM
+- [x] Verify generation tools coexist with read tools (can read existing worlds AND build new ones simultaneously)
+- [ ] Verify exported `.lk` file imports successfully into Legend Keeper
+- [ ] **Test**: end-to-end in Claude Code — "Create a world with 5 locations and export it", verify `.lk` file is produced
+
+---
+
+# Phase 3: Player-View Web Server
+
+## 3.1: Visibility Filtering
 - [ ] Implement `filter_hidden()` in `src/lk/filter.rs` — takes `LkRoot`, returns filtered `LkRoot`
 - [ ] Build set of hidden resource IDs: any resource with `isHidden: true`
 - [ ] Compute transitive hidden set: walk parentId chains — if a parent is hidden, all descendants are hidden regardless of their own `isHidden`
@@ -128,7 +210,7 @@
 - [ ] **Test**: verify a visible resource's hidden document is stripped but the resource remains
 - [ ] **Test**: verify a visible resource's hidden property is stripped but the resource remains
 
-## 2.2: Player-Mode WorldStore
+## 3.2: Player-Mode WorldStore
 - [ ] Add `player_mode: bool` field to `WorldStore`
 - [ ] When `player_mode` is true, apply `filter_hidden()` after `read_lk_file()` before storing in the HashMap
 - [ ] Apply the same filter on hot-reload
@@ -138,7 +220,7 @@
 - [ ] **Test**: verify `search_content` returns no results from hidden documents
 - [ ] **Test**: verify `get_resource_tree` has no gaps — hidden subtrees are fully removed
 
-## 2.3: HTTP Transport + Auth
+## 3.3: HTTP Transport + Auth
 - [ ] Add Phase 2 dependencies to Cargo.toml (axum, tower-http, or rmcp streamable-http transport)
 - [ ] Research rmcp's streamable HTTP server support — determine if it handles HTTP natively or if we need axum
 - [ ] Implement shared-secret auth: check `Authorization: Bearer <token>` header on every request
@@ -151,7 +233,7 @@
 - [ ] **Test**: send request without token, verify 401
 - [ ] **Test**: send request with wrong token, verify 401
 
-## 2.4: Containerization & Deployment
+## 3.4: Containerization & Deployment
 - [ ] Create `Dockerfile` — multi-stage build (rust builder → minimal runtime image)
 - [ ] Binary runs as non-root user in container
 - [ ] Worlds directory mounted as a volume (default: `/data/worlds/`)
@@ -162,7 +244,7 @@
 - [ ] **Test**: `docker build` succeeds
 - [ ] **Test**: `docker run` with a mounted `.lk` file, verify tools respond over HTTP
 
-## 2.5: Polish & Integration
+## 3.5: Polish & Integration
 - [ ] Update README with player-mode setup instructions
 - [ ] Document how friends configure Claude Desktop / ChatGPT to connect to the remote MCP server
 - [ ] Add health check endpoint (GET `/health` → 200 OK, no auth required)
@@ -172,33 +254,16 @@
 
 ---
 
-# Phase 3: Write Tools (Future)
+# Phase 4: Write Tools — Mutate Existing Worlds (Future)
 
-## 3.1: File Output
-- [ ] Add Phase 3 dependencies to Cargo.toml (comrak, chrono, rand)
+## 4.1: File Output
+- [ ] Add Phase 4 dependencies to Cargo.toml (if not already present from Phase 2)
 - [ ] Implement `write_lk_file()` in `src/lk/io.rs` — temp file, GzEncoder, serde_json::to_writer, fs::rename
 - [ ] Implement hash recomputation (SHA-256 of compact JSON resources array)
 - [ ] **Roundtrip test**: read each `.lk` in `tests/reference/`, write to temp, read back, compare all fields (except hash)
 - [ ] Decide output path strategy (separate from source .lk)
 
-## 3.2: Markdown-to-ProseMirror Converter
-- [ ] Implement `from_markdown(md: &str, resources: &[Resource]) -> Value` in `src/prosemirror/from_markdown.rs`
-- [ ] Use `comrak` to parse markdown into AST
-- [ ] Convert comrak paragraph → PM paragraph
-- [ ] Convert comrak heading → PM heading with level attr
-- [ ] Convert comrak list → PM bulletList/orderedList + listItem
-- [ ] Convert comrak table → PM table + tableRow + tableHeader/tableCell
-- [ ] Convert comrak blockquote → PM blockquote
-- [ ] Convert comrak thematic break → PM rule
-- [ ] Convert comrak image → PM mediaSingle + media with external type
-- [ ] Convert comrak link → PM text with link mark
-- [ ] Convert comrak emphasis/strong → PM text with em/strong marks
-- [ ] Convert comrak code/code_block → PM text with code mark / codeBlock node
-- [ ] Detect `[[Resource Name]]` in text → split into text + PM mention node (resolve name→ID from resources list) + text
-- [ ] Convert comrak task list items → PM taskList + taskItem with state attr
-- [ ] Handle comrak softbreak/linebreak → PM hardBreak
-
-## 3.3: Write Tools (MCP Wiring)
+## 4.2: Write Tools (MCP Wiring)
 - [ ] Create `src/tools/` module with request/response types
 - [ ] Implement `generate_id()` — 8-char lowercase alphanumeric random string
 - [ ] Wire `create_resource` tool — parse optional markdown content, call store, return created resource

@@ -3,8 +3,8 @@
 A Rust MCP server that provides read access to [Legend Keeper](https://www.legendkeeper.com/) `.lk` export files. Drop your world exports into a directory and browse them with any MCP client (Claude Code, Claude Desktop, ChatGPT, etc.).
 
 Runs in two modes:
-- **DM mode** (default): Local stdio server. All content visible, hidden items annotated.
-- **Player mode**: Web server with bearer-token auth. Hidden content hard-filtered from memory. Share your worlds with friends.
+- **DM mode** (default): Local stdio server. All content visible, hidden items annotated. Can also generate new `.lk` files from scratch.
+- **Player mode** (planned): Web server with bearer-token auth. Hidden content hard-filtered from memory. Share your worlds with friends.
 
 ## Features
 
@@ -14,7 +14,8 @@ Runs in two modes:
 - Map awareness: pins, regions, paths, labels, and calibration data with full coordinates for spatial reasoning and distance calculations
 - Visibility-aware: hidden documents and properties are exposed with annotations, letting the LLM distinguish player-visible from DM-only content
 - World instructions: tag a resource `llm-guide` to give Claude world-specific instructions
-- 7 read tools: `list_worlds`, `list_resources`, `get_resource`, `get_resource_tree`, `search_content`, `get_calendar`, `get_map`
+- Template-aware generation: new resources inherit property blocks (IMAGE, FRIENDS, ENEMIES, etc.) from your world's templates
+- 7 read tools + 8 generation tools
 
 ## Build
 
@@ -100,6 +101,33 @@ Example guide content:
 - "This is a D&D 5e campaign set in the Forgotten Realms"
 - "Never reveal content from resources tagged 'dm-secret' unless I ask"
 - "Use the Harptos calendar for all dates"
+
+## World generation
+
+Use the generation tools to have an LLM build a new Legend Keeper world from scratch. The LLM creates resources, writes content in markdown, and exports a `.lk` file you can import into Legend Keeper.
+
+Templates are extracted from your loaded worlds — the same templates you've defined in Legend Keeper's Templates folder. When creating a resource, the LLM picks a template and the server copies its property blocks (IMAGE, FRIENDS, ENEMIES, TAGS, etc.) onto the new resource.
+
+Example prompts:
+- "List the available templates, then create a new world called 'Sunken Isles' with 5 island locations using the Location template"
+- "Add an NPC called Captain Reef using the NPC template, with a backstory"
+- "Export the world so I can import it into Legend Keeper"
+
+Generation tools work alongside read tools — the LLM can reference your existing worlds while building a new one.
+
+### Generation tools
+
+| Tool | Description |
+|------|-------------|
+| `create_world` | Start a new world |
+| `list_templates` | List available templates from loaded worlds (NPC, Location, Character, etc.) with their property blocks |
+| `create_resource` | Add a resource with optional template, markdown content, tags, aliases, and visibility |
+| `add_document` | Add an additional document to a resource, optionally hidden |
+| `set_content` | Update a document's content |
+| `list_draft` | See what's been built so far |
+| `export_world` | Write the `.lk` file to disk |
+
+Exported files go to `~/.lk-worlds/exports/` by default.
 
 ## Player mode (sharing with friends)
 

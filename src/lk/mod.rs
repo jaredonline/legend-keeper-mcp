@@ -1,3 +1,4 @@
+pub mod builder;
 pub mod io;
 pub mod schema;
 pub mod store;
@@ -20,4 +21,8 @@ pub enum LkError {
     Json(#[from] serde_json::Error),
     #[error("HTTP error: {0}")]
     Http(String),
+    #[error("Draft resource not found: {0}")]
+    DraftResourceNotFound(String),
+    #[error("Draft document not found: {0}")]
+    DraftDocumentNotFound(String),
 }

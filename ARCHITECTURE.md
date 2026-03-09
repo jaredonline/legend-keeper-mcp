@@ -13,8 +13,9 @@ The user downloads `.lk` exports from Legend Keeper, drops them into the worlds 
 ## Project Phases
 
 - **Phase 1 (current):** Read-only local server. Load `.lk` into memory, expose 7 read tools via stdio. No file writes. DM sees everything including hidden content (annotated).
-- **Phase 2 (next):** Player-view web server. HTTP transport with shared-secret auth. Hard-filters all hidden content (resources, documents, properties) before storing in memory — hidden data never exists in the queryable store. Transitive visibility: if a parent resource is hidden, the entire subtree is removed. Containerized for deployment (EKS or similar).
-- **Phase 3 (future):** Write tools that produce a new `.lk` file for re-import. Adds `from_markdown.rs`, atomic file writes, ID generation, and 5 write tools.
+- **Phase 2 (next):** World generation. LLM builds a world from scratch via tool calls, then exports a `.lk` file for import into Legend Keeper. Adds `from_markdown.rs`, `write_lk_file()`, `WorldBuilder`, and 6 generation tools. One-way flow: LLM → `.lk` file → import.
+- **Phase 3 (future):** Player-view web server. HTTP transport with shared-secret auth. Hard-filters all hidden content (resources, documents, properties) before storing in memory — hidden data never exists in the queryable store. Transitive visibility: if a parent resource is hidden, the entire subtree is removed. Containerized for deployment (EKS or similar).
+- **Phase 4 (future):** Write tools that mutate existing worlds in-place. Read an existing `.lk`, modify resources, write it back. Superset of Phase 2's generation capabilities applied to existing data.
 
 ## The .lk File Format
 
@@ -28,7 +29,7 @@ LkRoot
 ├── resources: Vec<Resource> (flat list, tree structure via parentId)
 ├── calendars: Vec<Calendar> (custom calendar definitions; built-in calendars NOT included)
 ├── resourceCount: usize
-└── hash: String (SHA-256; recomputed on write in Phase 2)
+└── hash: String (SHA-256; computed on export in Phase 2)
 ```
 
 ### Resource
@@ -206,6 +207,33 @@ Property
 └── data: Value (type-specific, preserve structure)
 ```
 
+**Property data shapes by type:**
+
+| Type | Typical Titles | Data Shape |
+|------|---------------|------------|
+| `RESOURCE_LINK` | FRIENDS, ENEMIES, Partners, LOCATION, MEMBERS, etc. | `{"items": [{"id", "pos", "resourceId"}]}` |
+| `TEXT_FIELD` | SUMMARY, DATE, Pronounciation | `{"fragment": {"type": "doc", "content": [...]}}` |
+| `IMAGE` | IMAGE, FLAG, LOGO | `{"url": "", "origin": [0, 0], "scale": 1}` |
+| `TAGS` | TAGS | `null` (actual tags live on `Resource.tags`) |
+| `ALIAS` | ALIASES | `null` (actual aliases live on `Resource.aliases`) |
+| `MENTION` | BACKLINKS | `null` (system-computed) |
+| `SPOTIFY_SINGLE` | VIBE, AMBIENCE | `{"url": ""}` |
+
+### Templates
+
+Legend Keeper stores templates as resources under a special parent chain. The structure is:
+
+```
+Resource (parentId: null, id varies)
+└── "Default Templates " (parentId: "templates")
+    ├── NPC (tags: ["npc"], properties: [IMAGE, FRIENDS, ENEMIES, Partners, TAGS, ALIASES, BACKLINKS])
+    ├── Character (tags: ["character"], properties: [IMAGE, VIBE, SUMMARY, FRIENDS, ENEMIES, TAGS])
+    ├── Location (tags: ["location"], properties: [IMAGE, AMBIENCE, SUMMARY, LOCATED IN, TAGS])
+    └── ... (Event, Country, Creature, Organization, etc.)
+```
+
+Templates are identified by walking the `parentId` chain — any resource whose ancestor has `id == "templates"` is part of the template hierarchy. Each template's `properties` array defines the property blocks that are cloned (with fresh IDs) onto new resources created with that template.
+
 ### ProseMirror Content
 
 Page documents store content as ProseMirror JSON. The following node types are observed in the reference data:
@@ -245,14 +273,17 @@ legend-keeper-mcp/
         └── to_markdown.rs   # ProseMirror -> Markdown converter
 
     # Phase 2 additions:
+    # lk/io.rs              += write_lk_file() — gzip compression + output
+    # lk/builder.rs         — WorldBuilder: in-memory world assembly + export
+    # prosemirror/from_markdown.rs — Markdown -> ProseMirror converter (uses comrak)
+
+    # Phase 3 additions:
     # lk/filter.rs          — visibility filtering (transitive hidden removal)
     # Dockerfile            — multi-stage build for containerized deployment
     # docker-compose.yml    — local testing config
 
-    # Phase 3 additions:
-    # lk/io.rs              += write_lk_file() — gzip + atomic rename
-    # prosemirror/from_markdown.rs — Markdown -> ProseMirror converter (uses comrak)
-    # tools/                 — request/response types, read.rs, write.rs
+    # Phase 4 additions:
+    # tools/                 — request/response types for mutating existing worlds
 ```
 
 ---
@@ -289,11 +320,29 @@ All tools that operate on a specific world take a `world` parameter (the filenam
 | `get_calendar` | `world?: String`, `id_or_name: String` | Calendar definition: month/weekday/era structure |
 | `get_map` | `world?: String`, `id_or_name: String` | Map metadata + pins with positions, regions with full vertex coordinates, paths with full waypoint coordinates, labels, and calibration for a resource's map document. Coordinates enable precise distance/area calculations. Errors if resource has no map. |
 
-### Phase 2: Player-View Mode
+### Phase 2: Generation Tools (8 tools)
+
+The generation tools let the LLM build a new world from scratch during a conversation and export it as a `.lk` file. The world is assembled in memory via a `WorldBuilder` — separate from the read-only `WorldStore`. The LLM sends content as markdown, which is converted to ProseMirror for the `.lk` file. Only one world can be built at a time per session.
+
+Templates are extracted from loaded worlds — Legend Keeper stores templates as resources under a special "templates" parent. When creating a resource, the LLM can specify a template name to copy its property blocks (IMAGE, TAGS, ALIASES, FRIENDS, ENEMIES, etc.) onto the new resource. Relationship properties are created as empty blocks — they cannot be populated during generation.
+
+| Method | Input | Output |
+|--------|-------|--------|
+| `create_world` | `name: String` | Confirmation with world name |
+| `list_templates` | `world?: String` | Available template names with property block summaries |
+| `create_resource` | `name: String`, `parent_id?: String`, `tags?: Vec<String>`, `content?: String`, `is_hidden?: bool`, `template?: String`, `aliases?: Vec<String>` | Created resource summary (id, name) |
+| `add_document` | `resource_id: String`, `name: String`, `content: String`, `type?: String`, `is_hidden?: bool` | Created document summary |
+| `set_content` | `resource_id: String`, `document_id?: String`, `content: String` | Confirmation |
+| `list_draft` | *(none)* | Summary of in-progress world (resource names, hierarchy) |
+| `export_world` | `output_path?: String` | File path to the generated `.lk` file |
+
+Generation tools coexist with read tools — the LLM can read from existing worlds for reference while building a new one.
+
+### Phase 3: Player-View Mode
 
 In player mode (`--player`), the server operates identically to Phase 1 but with two key differences:
 
-1. **Visibility filtering**: All hidden content is removed from memory at load time. The same 7 tools are exposed, but they can only return player-visible data.
+1. **Visibility filtering**: All hidden content is removed from memory at load time. The same 7 read tools are exposed, but they can only return player-visible data.
 2. **HTTP transport + auth**: Instead of stdio, the server listens on HTTP with `Authorization: Bearer <token>` authentication. Friends connect their own LLM clients (Claude Desktop, ChatGPT, etc.) to the remote URL.
 
 **Filtering rules** (applied after `read_lk_file()`, before storing in WorldStore):
@@ -309,7 +358,7 @@ In player mode (`--player`), the server operates identically to Phase 1 but with
 - `get_resource` never emits `*(hidden)*` annotations (there's nothing hidden to annotate)
 - `get_resource_tree` has no gaps — hidden subtrees are fully pruned
 
-### Phase 3: Write Tools (5 tools, future)
+### Phase 4: Write Tools — Mutate Existing Worlds (5 tools, future)
 
 | Method | Input | Output |
 |--------|-------|--------|
@@ -339,7 +388,7 @@ pub struct WorldStore {
 - Loads all `.lk` files from the worlds directory on startup
 - Watches directory for file changes (add/remove/modify) and hot-reloads affected worlds
 - World name derived from filename: `rime.lk` → `"rime"`, `siqram.lk` → `"siqram"`
-- `Arc<RwLock>`: In Phase 1/2, writes only happen during reload. Phase 3 adds mutation via tools.
+- `Arc<RwLock>`: In Phase 1/2/3, writes only happen during reload. Phase 4 adds mutation via tools.
 - In player mode, `filter_hidden()` is applied after reading each `.lk` file and before inserting into the HashMap. Hidden content never exists in the queryable store.
 - The dataset is small (hundreds of resources per world) — linear scans are fine.
 
@@ -351,7 +400,7 @@ pub struct WorldStore {
 - `search_content(world, query, limit)` — iterate all docs (including hidden), convert ProseMirror to plaintext, case-insensitive substring match, return snippets with context and `is_hidden` flag. Also searches timeline event names.
 - `get_calendar(world, id_or_name)` — lookup by ID first, fallback to case-insensitive name match
 
-**Mutation methods (Phase 3, future):**
+**Mutation methods (Phase 4, future):**
 - `create_resource(req)` — generate 8-char ID, create default "Main" document, append to resources, increment resourceCount
 - `update_resource(id, patch)` — find by ID, apply non-None fields
 - `update_document_content(resource_id, doc_id, content, format)` — find doc, parse markdown to ProseMirror (or accept raw), update content and updatedAt
@@ -366,12 +415,12 @@ read_lk_file(path) -> Result<LkRoot>
   Open file → GzDecoder → serde_json::from_reader
 ```
 
-**Phase 3 additions:**
+**Phase 2 additions:**
 ```
 write_lk_file(path, root) -> Result<()>
-  Create temp file (path.lk.tmp) → GzEncoder → serde_json::to_writer → fs::rename (atomic)
+  GzEncoder → serde_json::to_writer → write to output path
 ```
-Hash recomputation on write: SHA-256 of compact JSON serialization of the resources array.
+Hash computation on write: SHA-256 of compact JSON serialization of the resources array.
 
 ### `src/prosemirror/types.rs` — ProseMirror Serde Types
 
@@ -418,7 +467,7 @@ Recursive converter. Node type mapping:
 
 **Mark rendering:** Wrap text in `**bold**`, `*italic*`, `` `code` ``, `[text](url)`, `~~strikethrough~~`, etc.
 
-### `src/prosemirror/from_markdown.rs` — Markdown → PM (Phase 3)
+### `src/prosemirror/from_markdown.rs` — Markdown → PM (Phase 2)
 
 Uses `comrak` crate to parse markdown into an AST, then converts each AST node to ProseMirror nodes.
 
@@ -444,11 +493,11 @@ Special handling:
 | `flate2` | 1.x | Gzip decompression (Phase 1); compression added in Phase 2 |
 | `notify` | 7.x | File system watching for hot-reload of .lk files |
 | `sha2` | 0.10.x | SHA-256 hash verification |
-| `axum` | 0.8.x | Phase 2: HTTP server for player-mode transport |
-| `tower-http` | 0.6.x | Phase 2: HTTP middleware (CORS, auth layer) |
-| `comrak` | 0.35.x | Phase 3: CommonMark markdown parsing (for MD → PM) |
-| `chrono` | 0.4.x | Phase 3: ISO 8601 timestamp generation (features: serde) |
-| `rand` | 0.9.x | Phase 3: Random ID generation |
+| `comrak` | 0.35.x | Phase 2: CommonMark markdown parsing (for MD → PM) |
+| `chrono` | 0.4.x | Phase 2: ISO 8601 timestamp generation (features: serde) |
+| `rand` | 0.9.x | Phase 2: Random ID generation |
+| `axum` | 0.8.x | Phase 3: HTTP server for player-mode transport |
+| `tower-http` | 0.6.x | Phase 3: HTTP middleware (CORS, auth layer) |
 
 ---
 
@@ -467,11 +516,19 @@ Domain errors defined in `src/lk/mod.rs`:
 
 **Phase 2 additions:**
 
+| Error | MCP Code | When |
+|-------|----------|------|
+| `NoDraftWorld` | -32001 | Generation tool called without `create_world` first |
+| `DraftResourceNotFound(id)` | -32001 | `add_document`/`set_content` with unknown resource ID in draft |
+| `DraftDocumentNotFound(id)` | -32001 | `set_content` with unknown document ID in draft |
+
+**Phase 3 additions:**
+
 | Error | HTTP Code | When |
 |-------|-----------|------|
 | `Unauthorized` | 401 | Missing or invalid bearer token in player mode |
 
-**Phase 3 additions:**
+**Phase 4 additions:**
 
 | Error | MCP Code | When |
 |-------|----------|------|
@@ -490,7 +547,7 @@ All `LkError` variants convert to `McpError` via `From` impl at the tool boundar
 legend-keeper-mcp [worlds-directory]
 ```
 
-**CLI usage (Player mode — Phase 2):**
+**CLI usage (Player mode — Phase 3):**
 ```
 legend-keeper-mcp --player --secret <token> [--port <port>] [worlds-directory]
 ```
@@ -579,7 +636,40 @@ Or with a custom directory:
     DM's LLM client
 ```
 
-### Phase 2: Player Mode (HTTP)
+### Phase 2: World Generation (stdio)
+
+```
+    LLM client (Claude Code, etc.)
+         │
+         │ create_world, create_resource,
+         │ add_document, set_content, ...
+         ▼
+    ┌─────────────────────┐
+    │   MCP stdio         │
+    │   (JSON-RPC)        │
+    └─────────┬───────────┘
+              │
+              ▼
+    ┌─────────────────────┐
+    │    WorldBuilder      │
+    │  (in-memory LkRoot  │
+    │   being assembled)  │
+    └─────────┬───────────┘
+              │ export_world
+              ▼
+    ┌─────────────────────┐
+    │  write_lk_file()    │
+    │  ~/.lk-worlds/      │
+    │    exports/world.lk │
+    └─────────────────────┘
+              │
+              ▼
+    Import into Legend Keeper
+```
+
+Note: Read tools (WorldStore) and generation tools (WorldBuilder) coexist in the same server session. The LLM can read existing worlds for reference while building a new one.
+
+### Phase 3: Player Mode (HTTP)
 
 ```
          ~/.lk-worlds/ (or /data/worlds/ in container)
