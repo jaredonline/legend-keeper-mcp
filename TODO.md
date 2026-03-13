@@ -130,6 +130,7 @@
 - [x] Convert comrak heading → PM heading with level attr
 - [x] Convert comrak list → PM bulletList/orderedList + listItem
 - [x] Convert comrak table → PM table + tableRow + tableHeader/tableCell
+- [x] Convert headerless pipe tables (LLM-generated) → header-column tables (first cell = tableHeader on every row)
 - [x] Convert comrak blockquote → PM blockquote
 - [x] Convert comrak thematic break → PM rule
 - [x] Convert comrak image → PM mediaSingle + media with external type
@@ -137,7 +138,7 @@
 - [x] Convert comrak emphasis/strong → PM text with em/strong marks
 - [x] Convert comrak code/code_block → PM text with code mark / codeBlock node
 - [x] Detect `[[Resource Name]]` in text → split into text + PM mention node (resolve name→ID from resources list) + text
-- [x] Convert comrak task list items → PM taskList + taskItem with state attr
+- [x] Convert comrak task list items → PM taskList + taskItem with state attr (inline content, not wrapped in paragraph)
 - [x] Handle comrak softbreak/linebreak → PM hardBreak
 - [ ] **Test**: round-trip — take ProseMirror from reference `.lk`, convert to markdown, convert back, verify structural equivalence
 
@@ -187,7 +188,13 @@
 - [x] **Test**: create a resource with `template: "NPC"` and explicit tags, verify tags are merged (template tags + explicit tags)
 - [x] **Test**: `list_templates` via MCP returns template names
 
-## 2.7: Polish & Integration
+## 2.7: CLI `exports` Subcommand
+- [x] Add `exports` subcommand to `main.rs` — lists `.lk` files in `~/.lk-worlds/exports/`
+- [x] For each file: read metadata (world name, resource count, export date, file size)
+- [x] Print a formatted summary table to stdout
+- [x] Handle empty directory gracefully
+
+## 2.8: Polish & Integration
 - [x] Update README with world generation instructions
 - [x] Add server instructions mentioning generation tools to the LLM
 - [x] Verify generation tools coexist with read tools (can read existing worlds AND build new ones simultaneously)

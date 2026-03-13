@@ -92,6 +92,16 @@ Ask Claude about your worlds:
 
 All tools that operate on a specific world take an optional `world` parameter (the filename without `.lk`). If only one world is loaded, it's used automatically.
 
+## Checking exports
+
+List generated `.lk` files waiting to be imported into Legend Keeper:
+
+```sh
+legend-keeper-mcp exports
+```
+
+Shows the world name, resource count, export date, and file size for each file in `~/.lk-worlds/exports/`.
+
 ## World guide (`.lk-guide`)
 
 You can give Claude world-specific instructions by creating a resource in Legend Keeper and tagging it `llm-guide`. Its page content will be included in the `list_worlds` response, so Claude sees it at the start of every conversation.

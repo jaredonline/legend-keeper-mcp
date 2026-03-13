@@ -292,8 +292,9 @@ legend-keeper-mcp/
 
 ### `src/main.rs`
 
-- Resolves worlds directory: CLI arg 1, `LK_WORLDS` env var, or default `~/.lk-worlds/`
+- Resolves worlds directory: CLI arg or `LK_WORLDS` env var or default `~/.lk-worlds/`
 - Creates directory if it doesn't exist
+- Subcommand routing: `exports` subcommand lists generated `.lk` files in `exports/` subdirectory; no subcommand starts the MCP server
 - Calls `WorldStore::load(dir)` to read all `.lk` files and start file watcher
 - Logs world count and resource counts to stderr (stdout is the MCP transport)
 - Creates `LkServer`, starts rmcp stdio transport, awaits shutdown
@@ -474,7 +475,8 @@ Uses `comrak` crate to parse markdown into an AST, then converts each AST node t
 Special handling:
 - `[[Resource Name]]` syntax in text → split into text + mention node + text. Resolve resource name to ID via the store's resource list.
 - Images → mediaSingle + media nodes with external type
-- Tables → table + tableRow + tableHeader/tableCell
+- Standard GFM tables (with `|---|` separator) → table + tableRow + tableHeader (first row) / tableCell (data rows)
+- Headerless pipe tables (LLM-generated, no separator row) → extracted before comrak parsing, converted to header-COLUMN tables where the first cell of every row is `tableHeader` and the rest are `tableCell`. This matches Legend Keeper's key-value table style.
 - Task lists → taskList + taskItem with state attrs
 
 ---
