@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "legend_keeper_mcp",
+  "project_id": "8d469656-b03f-46b5-a802-fda42bed2833"
+}
