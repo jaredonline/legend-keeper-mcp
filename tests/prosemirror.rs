@@ -233,3 +233,52 @@ fn from_markdown_table_roundtrip() {
     assert!(roundtrip_md.contains("Languages"), "Roundtrip should contain 'Languages': {}", roundtrip_md);
     assert!(roundtrip_md.contains("|"), "Roundtrip should contain table pipes: {}", roundtrip_md);
 }
+
+#[test]
+fn from_markdown_tasklist_with_nested_list() {
+    // Task items with nested bullet lists — LK only allows inline content in taskItem.
+    // The nested list should be dropped, not placed inside the taskItem.
+    let md = "- [ ] Decide what she shares\n  - Freely: basic info\n  - Holds back: secrets\n- [ ] Simple task\n";
+    let pm = from_markdown(md, &[]);
+
+    let content = pm["content"].as_array().unwrap();
+
+    // Walk all nodes and verify no block-level content inside taskItem
+    let mut task_items_checked = 0usize;
+    fn check_task_items(node: &serde_json::Value, count: &mut usize) {
+        if node.get("type").and_then(|t| t.as_str()) == Some("taskItem") {
+            let children = node.get("content").and_then(|c| c.as_array());
+            assert!(children.is_some() && !children.unwrap().is_empty(),
+                "taskItem should have non-empty content: {}", serde_json::to_string_pretty(node).unwrap());
+            for child in children.unwrap() {
+                let ctype = child.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                assert!(
+                    matches!(ctype, "text" | "hardBreak" | "mention" | "inlineExtension"),
+                    "taskItem contains invalid child type '{}': {}",
+                    ctype,
+                    serde_json::to_string_pretty(node).unwrap()
+                );
+            }
+            *count += 1;
+        }
+        if let Some(children) = node.get("content").and_then(|c| c.as_array()) {
+            for child in children {
+                check_task_items(child, count);
+            }
+        }
+    }
+
+    for node in content {
+        check_task_items(node, &mut task_items_checked);
+    }
+    assert!(task_items_checked >= 2, "Expected at least 2 taskItems, found {}", task_items_checked);
+
+    // Verify the task text is still present
+    let pm_str = serde_json::to_string(&pm).unwrap();
+    assert!(pm_str.contains("Decide what she shares"), "Task text should be preserved");
+    assert!(pm_str.contains("Simple task"), "Second task should be preserved");
+
+    // Verify nested list content was dropped, not flattened
+    assert!(!pm_str.contains("Freely"), "Nested list text should be dropped, not flattened");
+    assert!(!pm_str.contains("Holds back"), "Nested list text should be dropped, not flattened");
+}

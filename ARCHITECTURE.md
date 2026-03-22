@@ -252,7 +252,7 @@ Page documents store content as ProseMirror JSON. The following node types are o
 legend-keeper-mcp/
 ├── Cargo.toml
 ├── ARCHITECTURE.md          # This file
-├── TODO.md                  # Implementation task list
+├── .beads/                  # bd issue tracker database
 ├── PRINCIPLES.md            # Design principles and conventions
 ├── .gitignore
 ├── tests/
@@ -323,7 +323,7 @@ All tools that operate on a specific world take a `world` parameter (the filenam
 
 ### Phase 2: Generation Tools (8 tools)
 
-The generation tools let the LLM build a new world from scratch during a conversation and export it as a `.lk` file. The world is assembled in memory via a `WorldBuilder` — separate from the read-only `WorldStore`. The LLM sends content as markdown, which is converted to ProseMirror for the `.lk` file. Only one world can be built at a time per session.
+The generation tools let the LLM build a new world from scratch during a conversation and export it as a `.lk` file. The world is assembled in memory via a `WorldBuilder` — separate from the read-only `WorldStore`. The LLM sends content as markdown, which is converted to ProseMirror for the `.lk` file. Only one world can be built at a time per session. Resources default to hidden (`isHidden: true`) so exported worlds are safe to import — the DM unhides resources in Legend Keeper after review. Set `is_hidden: false` explicitly to make a resource visible.
 
 Templates are extracted from loaded worlds — Legend Keeper stores templates as resources under a special "templates" parent. When creating a resource, the LLM can specify a template name to copy its property blocks (IMAGE, TAGS, ALIASES, FRIENDS, ENEMIES, etc.) onto the new resource. Relationship properties are created as empty blocks — they cannot be populated during generation.
 
@@ -336,6 +336,7 @@ Templates are extracted from loaded worlds — Legend Keeper stores templates as
 | `set_content` | `resource_id: String`, `document_id?: String`, `content: String` | Confirmation |
 | `list_draft` | *(none)* | Summary of in-progress world (resource names, hierarchy) |
 | `export_world` | `output_path?: String` | File path to the generated `.lk` file |
+| `batch_create` | `world_name?: String`, `template_world?: String`, `resources: Vec<BatchResourceSpec>` | Summary of all created resources. Each resource spec includes name, parent, tags, content, template, aliases, is_hidden, and additional documents. Creates the draft world if `world_name` is provided and no draft exists. Parent references can use names of resources earlier in the same batch. |
 
 Generation tools coexist with read tools — the LLM can read from existing worlds for reference while building a new one.
 

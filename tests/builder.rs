@@ -199,6 +199,33 @@ fn mention_resolution_in_content() {
 }
 
 #[test]
+fn resource_hidden_by_default_when_omitted() {
+    let mut builder = WorldBuilder::new("test");
+
+    // Create a resource without specifying is_hidden (the server passes unwrap_or(true))
+    let defaulted = builder
+        .create_resource("Default Resource", None, None, Some("No is_hidden specified."), true, Vec::new(), Vec::new())
+        .unwrap();
+
+    // Create a resource with explicit is_hidden: false
+    let explicit_visible = builder
+        .create_resource("Visible Resource", None, None, Some("Explicitly visible."), false, Vec::new(), Vec::new())
+        .unwrap();
+
+    let tmp = TempDir::new().unwrap();
+    let output = tmp.path().join("test.lk");
+    builder.export_world(Some(output.to_str().unwrap())).unwrap();
+
+    let root = read_lk_file(&output).unwrap();
+
+    let defaulted_r = root.resources.iter().find(|r| r.id == defaulted.id).unwrap();
+    assert!(defaulted_r.is_hidden, "Resource with is_hidden=true (server default) should be hidden");
+
+    let visible_r = root.resources.iter().find(|r| r.id == explicit_visible.id).unwrap();
+    assert!(!visible_r.is_hidden, "Resource with explicit is_hidden=false should be visible");
+}
+
+#[test]
 fn hidden_resource_persists_through_export() {
     let mut builder = WorldBuilder::new("test");
 

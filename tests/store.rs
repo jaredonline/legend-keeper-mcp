@@ -46,7 +46,12 @@ fn load_and_query_worlds() {
     let cal = store.get_calendar(&Some("siqram".to_string()), "Siqram");
     assert!(cal.is_ok(), "Should find Siqram calendar");
     let cal = cal.unwrap();
-    eprintln!("Calendar: {} ({} months, {} weekdays)", cal.name, cal.months.len(), cal.weekdays.len());
+    assert!(!cal.months.is_empty(), "Siqram calendar should have months");
+    assert!(!cal.weekdays.is_empty(), "Siqram calendar should have weekdays");
+    assert!(cal.negative_era.is_some(), "Siqram calendar should have a negative era");
+    eprintln!("Calendar: {} ({} months, {} weekdays, negative_era={})",
+        cal.name, cal.months.len(), cal.weekdays.len(),
+        cal.negative_era.as_ref().map(|e| e.name.as_str()).unwrap_or("none"));
 }
 
 #[test]

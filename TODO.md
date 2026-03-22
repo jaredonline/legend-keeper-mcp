@@ -188,7 +188,16 @@
 - [x] **Test**: create a resource with `template: "NPC"` and explicit tags, verify tags are merged (template tags + explicit tags)
 - [x] **Test**: `list_templates` via MCP returns template names
 
-## 2.7: CLI `exports` Subcommand
+## 2.7: Batch Creation Tool
+- [x] Add `BatchResourceSpec` param type — name, parent_id, tags, content, is_hidden, template, aliases, plus `documents` array
+- [x] Add `BatchDocumentSpec` — name, content, doc_type, is_hidden
+- [x] Add `BatchCreateParams` — world_name (optional, creates world if provided), template_world, resources array
+- [x] Implement `batch_create` tool in server.rs — optionally creates world, then creates all resources with their documents in one call
+- [x] Support parent references by name within the batch (for nesting resources created in the same batch)
+- [x] Update ARCHITECTURE.md with new tool
+- [x] Update README.md with new tool
+
+## 2.8: CLI `exports` Subcommand
 - [x] Add `exports` subcommand to `main.rs` — lists `.lk` files in `~/.lk-worlds/exports/`
 - [x] For each file: read metadata (world name, resource count, export date, file size)
 - [x] Print a formatted summary table to stdout

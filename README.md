@@ -114,7 +114,7 @@ Example guide content:
 
 ## World generation
 
-Use the generation tools to have an LLM build a new Legend Keeper world from scratch. The LLM creates resources, writes content in markdown, and exports a `.lk` file you can import into Legend Keeper.
+Use the generation tools to have an LLM build a new Legend Keeper world from scratch. The LLM creates resources, writes content in markdown, and exports a `.lk` file you can import into Legend Keeper. Generated resources are **hidden by default** so you can review them before showing to players — unhide resources in Legend Keeper as you approve them.
 
 Templates are extracted from your loaded worlds — the same templates you've defined in Legend Keeper's Templates folder. When creating a resource, the LLM picks a template and the server copies its property blocks (IMAGE, FRIENDS, ENEMIES, TAGS, etc.) onto the new resource.
 
@@ -136,6 +136,9 @@ Generation tools work alongside read tools — the LLM can reference your existi
 | `set_content` | Update a document's content |
 | `list_draft` | See what's been built so far |
 | `export_world` | Write the `.lk` file to disk |
+| `batch_create` | Create the world + multiple resources with all their documents in one call. Supports templates, tags, content, aliases, visibility, and parent references by name within the batch. |
+
+**Prefer `batch_create`** over calling `create_resource` + `add_document` individually — it's much faster since it avoids per-resource round trips.
 
 Exported files go to `~/.lk-worlds/exports/` by default.
 

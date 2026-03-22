@@ -187,31 +187,23 @@ fn convert_node<'a>(node: &'a AstNode<'a>, resources: &[Resource]) -> Option<Val
         NodeValue::TaskItem(checked) => {
             let state = if checked.is_some() { "DONE" } else { "TODO" };
             let children = convert_children(node, resources);
-            // LK expects taskItem to contain inline content directly (text, hardBreak, etc.),
-            // not wrapped in a paragraph. Comrak puts a paragraph inside list items,
-            // so unwrap single-paragraph children to get the inlines.
-            let inlines = if children.len() == 1
-                && children[0].get("type").and_then(|t| t.as_str()) == Some("paragraph")
-            {
-                children[0]
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                // Multiple children or non-paragraph — flatten any paragraphs
-                let mut flat = Vec::new();
-                for child in &children {
-                    if child.get("type").and_then(|t| t.as_str()) == Some("paragraph") {
-                        if let Some(content) = child.get("content").and_then(|c| c.as_array()) {
-                            flat.extend(content.iter().cloned());
-                        }
-                    } else {
-                        flat.push(child.clone());
+            // LK expects taskItem to contain inline content only (text, hardBreak, mention).
+            // Comrak wraps content in paragraphs and may include nested lists.
+            // Extract inlines from paragraphs; drop block-level children (bulletList, etc.)
+            // since LK's schema doesn't support them inside taskItem.
+            let mut inlines = Vec::new();
+            for child in &children {
+                let ctype = child.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if ctype == "paragraph" {
+                    if let Some(content) = child.get("content").and_then(|c| c.as_array()) {
+                        inlines.extend(content.iter().cloned());
                     }
+                } else if is_inline_type(ctype) {
+                    inlines.push(child.clone());
                 }
-                flat
-            };
+                // Block-level children (bulletList, orderedList, etc.) are dropped —
+                // LK cannot represent them inside taskItem.
+            }
             let mut item = json!({
                 "type": "taskItem",
                 "attrs": { "state": state }
@@ -622,6 +614,14 @@ fn build_header_column_table(table: &ExtractedTable, resources: &[Resource]) -> 
         "type": "table",
         "content": rows
     })
+}
+
+/// Check if a ProseMirror node type is valid inline content for LK.
+fn is_inline_type(node_type: &str) -> bool {
+    matches!(
+        node_type,
+        "text" | "hardBreak" | "mention" | "inlineExtension"
+    )
 }
 
 /// Add a mark to all text nodes in a list, returning the modified list.

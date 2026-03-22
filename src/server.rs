@@ -95,7 +95,7 @@ pub struct CreateResourceParams {
     pub tags: Option<Vec<String>>,
     /// Markdown content for the resource's main page document.
     pub content: Option<String>,
-    /// Mark this resource as hidden (DM-only). Defaults to false.
+    /// Mark this resource as hidden (DM-only). Defaults to true — resources are hidden on export so the DM can review before showing to players. Set to false to make visible immediately.
     pub is_hidden: Option<bool>,
     /// Template name to apply (e.g. "NPC", "Location"). Use list_templates to see available templates. Copies property blocks from the template.
     pub template: Option<String>,
@@ -142,6 +142,50 @@ pub struct ListDraftParams {}
 pub struct ExportWorldParams {
     /// Output file path. Defaults to ~/.lk-worlds/exports/{name}.lk
     pub output_path: Option<String>,
+}
+
+// --- Batch creation types ---
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BatchDocumentSpec {
+    /// Document name (e.g. "DM Notes", "History").
+    pub name: String,
+    /// Markdown content for the document.
+    pub content: String,
+    /// Document type: "page" (default), "map", or "time".
+    pub doc_type: Option<String>,
+    /// Mark this document as hidden (DM-only). Defaults to false.
+    pub is_hidden: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BatchResourceSpec {
+    /// Resource name.
+    pub name: String,
+    /// Parent resource ID, or the name of another resource in this batch.
+    pub parent: Option<String>,
+    /// Tags for the resource.
+    pub tags: Option<Vec<String>>,
+    /// Markdown content for the resource's main page document.
+    pub content: Option<String>,
+    /// Mark this resource as hidden (DM-only). Defaults to true — resources are hidden on export so the DM can review before showing to players. Set to false to make visible immediately.
+    pub is_hidden: Option<bool>,
+    /// Template name to apply (e.g. "NPC", "Location").
+    pub template: Option<String>,
+    /// Alternative names for this resource.
+    pub aliases: Option<Vec<String>>,
+    /// Additional documents beyond the main page.
+    pub documents: Option<Vec<BatchDocumentSpec>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BatchCreateParams {
+    /// World name. If no draft world exists, one will be created with this name. Required if no draft world exists.
+    pub world_name: Option<String>,
+    /// World to source templates from. Only needed if multiple worlds are loaded.
+    pub template_world: Option<String>,
+    /// Resources to create, in order. Parent references can use IDs or names of resources earlier in this array.
+    pub resources: Vec<BatchResourceSpec>,
 }
 
 // --- Tool implementations ---
@@ -327,7 +371,7 @@ impl LkServer {
                 params.parent_id.as_deref(),
                 Some(tags),
                 params.content.as_deref(),
-                params.is_hidden.unwrap_or(false),
+                params.is_hidden.unwrap_or(true),
                 params.aliases.unwrap_or_default(),
                 template_props.map(|(props, _)| props).unwrap_or_default(),
             )
@@ -390,13 +434,130 @@ impl LkServer {
             .map_err(|e| e.to_string())?;
         Ok(format!("Exported to: {}", path.display()))
     }
+
+    #[tool(description = "Create multiple resources (with all their documents) in a single call. Optionally creates the draft world too. Each resource can specify a template, tags, content, aliases, visibility, and additional documents. Use this instead of calling create_resource + add_document repeatedly. Parent references can use the name of a resource earlier in the same batch.")]
+    async fn batch_create(
+        &self,
+        Parameters(params): Parameters<BatchCreateParams>,
+    ) -> Result<String, String> {
+        // Pre-resolve all unique template names from the WorldStore before taking the builder lock
+        let mut template_cache: std::collections::HashMap<String, (Vec<crate::lk::schema::Property>, Vec<String>)> = std::collections::HashMap::new();
+        for spec in &params.resources {
+            if let Some(ref tname) = spec.template {
+                let key = tname.to_lowercase();
+                if !template_cache.contains_key(&key) {
+                    let (props, tags) = self
+                        .store
+                        .get_template_properties(&params.template_world, tname)
+                        .map_err(|e| e.to_string())?;
+                    template_cache.insert(key, (props, tags));
+                }
+            }
+        }
+
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+
+        // Create world if needed
+        if let Some(ref world_name) = params.world_name {
+            if builder.is_none() {
+                *builder = Some(WorldBuilder::new(world_name));
+            }
+        }
+
+        let b = builder.as_mut().ok_or_else(|| {
+            "No draft world — provide world_name or call create_world first".to_string()
+        })?;
+
+        // Track name→id mappings for parent references within this batch
+        let mut name_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut created: Vec<serde_json::Value> = Vec::new();
+
+        for spec in params.resources {
+            // Resolve parent: try as ID first, then as a batch name reference
+            let parent_id = spec.parent.as_ref().map(|p| {
+                name_to_id
+                    .get(&p.to_lowercase())
+                    .cloned()
+                    .unwrap_or_else(|| p.clone())
+            });
+
+            // Merge tags with template tags
+            let mut tags = spec.tags.unwrap_or_default();
+            let properties = if let Some(ref tname) = spec.template {
+                let key = tname.to_lowercase();
+                if let Some((props, template_tags)) = template_cache.get(&key) {
+                    for t in template_tags {
+                        if !tags.iter().any(|existing| existing.eq_ignore_ascii_case(t)) {
+                            tags.push(t.clone());
+                        }
+                    }
+                    props.clone()
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+
+            let summary = b
+                .create_resource(
+                    &spec.name,
+                    parent_id.as_deref(),
+                    Some(tags),
+                    spec.content.as_deref(),
+                    spec.is_hidden.unwrap_or(true),
+                    spec.aliases.unwrap_or_default(),
+                    properties,
+                )
+                .map_err(|e| e.to_string())?;
+
+            let resource_id = summary.id.clone();
+            name_to_id.insert(spec.name.to_lowercase(), resource_id.clone());
+
+            let mut doc_summaries: Vec<serde_json::Value> = Vec::new();
+
+            // Add additional documents
+            if let Some(docs) = spec.documents {
+                for doc_spec in docs {
+                    let doc_summary = b
+                        .add_document(
+                            &resource_id,
+                            &doc_spec.name,
+                            &doc_spec.content,
+                            doc_spec.doc_type.as_deref(),
+                            doc_spec.is_hidden.unwrap_or(false),
+                        )
+                        .map_err(|e| e.to_string())?;
+                    doc_summaries.push(serde_json::json!({
+                        "id": doc_summary.id,
+                        "name": doc_summary.name,
+                    }));
+                }
+            }
+
+            let mut entry = serde_json::json!({
+                "id": summary.id,
+                "name": summary.name,
+            });
+            if !doc_summaries.is_empty() {
+                entry["additional_documents"] = serde_json::json!(doc_summaries);
+            }
+            created.push(entry);
+        }
+
+        let result = serde_json::json!({
+            "created": created.len(),
+            "resources": created,
+        });
+        serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+    }
 }
 
 #[tool_handler]
 impl ServerHandler for LkServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            instructions: Some("Legend Keeper MCP server. Provides read access to .lk world-building files. Use list_worlds to see available worlds, then browse resources, search content, and view calendars. You can also generate new worlds: call list_templates first to see available templates (NPC, Location, etc.), then use create_world to start, create_resource with a template to add content with proper property blocks, and export_world to produce a .lk file for import into Legend Keeper.".to_string()),
+            instructions: Some("Legend Keeper MCP server. Provides read access to .lk world-building files. Use list_worlds to see available worlds, then browse resources, search content, and view calendars. You can also generate new worlds: call list_templates first to see available templates (NPC, Location, etc.), then use batch_create to create the world and all resources with their documents in a single call. Each resource can have a template, content, tags, aliases, visibility, and additional documents (like DM Notes). Use export_world when done to produce a .lk file for import into Legend Keeper. Prefer batch_create over individual create_resource/add_document calls for efficiency. Resources are hidden by default so the DM can review before showing to players — set is_hidden to false to make a resource immediately visible.".to_string()),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..ServerInfo::default()
         }

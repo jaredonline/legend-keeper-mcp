@@ -134,7 +134,8 @@ pub struct Calendar {
     pub week_resets_each_month: bool,
     pub hours_in_day: u32,
     pub minutes_in_hour: u32,
-    pub negative_era: Era,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub negative_era: Option<Era>,
     #[serde(default)]
     pub positive_eras: Vec<Era>,
     #[serde(default)]
