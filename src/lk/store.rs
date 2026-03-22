@@ -581,8 +581,41 @@ fn find_snippet(text: &str, query_lower: &str) -> Option<String> {
     let text_lower = text.to_lowercase();
     let pos = text_lower.find(query_lower)?;
 
-    let start = if pos > 50 { pos - 50 } else { 0 };
-    let end = (pos + query_lower.len() + 50).min(text.len());
+    // Map byte offset from lowercased text back to original text by walking
+    // both strings character-by-character.
+    let mut orig_pos = 0;
+    let mut lower_offset = 0;
+    for ch in text.chars() {
+        if lower_offset >= pos {
+            break;
+        }
+        let lower_ch_len: usize = ch.to_lowercase().map(|c| c.len_utf8()).sum();
+        lower_offset += lower_ch_len;
+        orig_pos += ch.len_utf8();
+    }
+
+    // Walk backwards from orig_pos to find start (up to 50 chars back)
+    let mut start = orig_pos;
+    let mut chars_back = 0;
+    for (i, _) in text[..orig_pos].char_indices().rev() {
+        start = i;
+        chars_back += 1;
+        if chars_back >= 50 {
+            break;
+        }
+    }
+
+    // Walk forwards from orig_pos to find end (query length + 50 chars forward)
+    let mut end = orig_pos;
+    let mut chars_fwd = 0;
+    let target_fwd = query_lower.chars().count() + 50;
+    for (i, ch) in text[orig_pos..].char_indices() {
+        end = orig_pos + i + ch.len_utf8();
+        chars_fwd += 1;
+        if chars_fwd >= target_fwd {
+            break;
+        }
+    }
 
     let mut snippet = String::new();
     if start > 0 {
