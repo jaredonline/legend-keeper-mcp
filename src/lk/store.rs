@@ -6,7 +6,7 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::Value;
 
 use super::io::read_lk_file;
-use super::schema::{Calendar, LkRoot, Property, Resource, TimelineContent};
+use super::schema::{BoardContent, Calendar, LkRoot, Property, Resource, TimelineContent};
 use super::LkError;
 use crate::prosemirror::to_markdown::to_markdown;
 
@@ -21,6 +21,14 @@ pub struct TemplateSummary {
 pub struct TemplatePropertySummary {
     pub prop_type: String,
     pub title: String,
+}
+
+/// Icon fields extracted from a template resource.
+#[derive(Clone)]
+pub struct TemplateIcon {
+    pub icon_color: Option<String>,
+    pub icon_glyph: Option<String>,
+    pub icon_shape: Option<String>,
 }
 
 #[derive(Clone)]
@@ -184,6 +192,15 @@ impl WorldStore {
                 }
             }
         }
+    }
+
+    /// Clone a world's LkRoot for use in the builder.
+    pub fn get_world(&self, name: &str) -> Result<LkRoot, LkError> {
+        let worlds = self.worlds.read().unwrap();
+        worlds
+            .get(name)
+            .cloned()
+            .ok_or_else(|| LkError::WorldNotFound(name.to_string()))
     }
 
     pub fn list_worlds(&self) -> Vec<WorldSummary> {
@@ -391,6 +408,31 @@ impl WorldStore {
                             }
                         }
                     }
+                    "board" => {
+                        if let Some(content) = &doc.content {
+                            if let Ok(board) =
+                                serde_json::from_value::<BoardContent>(content.clone())
+                            {
+                                for record in &board.shapes_v2 {
+                                    if results.len() >= limit {
+                                        break;
+                                    }
+                                    let text = extract_text_from_board_record(record);
+                                    if !text.is_empty()
+                                        && text.to_lowercase().contains(&query_lower)
+                                    {
+                                        results.push(SearchResult {
+                                            resource_id: resource.id.clone(),
+                                            resource_name: resource.name.clone(),
+                                            document_name: doc.name.clone(),
+                                            snippet: format!("Board shape: {}", text),
+                                            is_hidden: doc.is_hidden,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -447,11 +489,12 @@ impl WorldStore {
     }
 
     /// Get the full property list for a template by name, with fresh IDs generated for each property.
+    /// Also returns the template's tags and icon fields.
     pub fn get_template_properties(
         &self,
         world: &Option<String>,
         template_name: &str,
-    ) -> Result<(Vec<Property>, Vec<String>), LkError> {
+    ) -> Result<(Vec<Property>, Vec<String>, TemplateIcon), LkError> {
         let worlds = self.worlds.read().unwrap();
         let (_, root) = Self::resolve_world(&worlds, world)?;
         let templates = Self::extract_templates(root);
@@ -479,7 +522,13 @@ impl WorldStore {
             })
             .collect();
 
-        Ok((properties, template.tags.clone()))
+        let icon = TemplateIcon {
+            icon_color: template.icon_color.clone(),
+            icon_glyph: template.icon_glyph.clone(),
+            icon_shape: template.icon_shape.clone(),
+        };
+
+        Ok((properties, template.tags.clone(), icon))
     }
 
     /// Find all template resources by walking the parentId chain looking for id == "templates".
@@ -574,6 +623,21 @@ fn extract_text_recursive(node: &Value, out: &mut String) {
             }
         }
     }
+}
+
+/// Extract searchable text from a board record (shape text, arrow labels, etc.).
+fn extract_text_from_board_record(record: &super::schema::BoardRecord) -> String {
+    let val = &record.val;
+    // Only shapes have user-visible text
+    if val.get("typeName").and_then(|v| v.as_str()) != Some("shape") {
+        return String::new();
+    }
+    // Text lives in props.text for geo, text, and arrow shapes
+    val.get("props")
+        .and_then(|p| p.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Find a snippet around the first match of query in text.

@@ -259,6 +259,23 @@ pub struct MapContent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BoardContent {
+    #[serde(default)]
+    pub shapes: Vec<Value>,
+    #[serde(default)]
+    pub bindings: Vec<Value>,
+    #[serde(default, rename = "shapesV2")]
+    pub shapes_v2: Vec<BoardRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BoardRecord {
+    pub key: String,
+    pub val: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TimelineContent {
     #[serde(default)]
     pub lanes: Vec<Lane>,

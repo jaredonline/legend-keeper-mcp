@@ -153,3 +153,77 @@ fn inspect_map_data() {
         }
     }
 }
+
+#[test]
+fn get_world_clones_lk_root() {
+    let store = WorldStore::load(Path::new("tests/reference")).unwrap();
+
+    let root = store.get_world("rime").unwrap();
+    assert!(!root.resources.is_empty());
+    assert_eq!(root.version, 1);
+
+    // Nonexistent world returns error
+    let err = store.get_world("nonexistent");
+    assert!(err.is_err());
+}
+
+#[test]
+fn board_documents_parsed() {
+    let store = WorldStore::load(Path::new("tests/reference")).unwrap();
+    let world = Some("rime".to_string());
+    let resource = store.get_resource(&world, "Mind Map").unwrap();
+
+    let board_doc = resource
+        .documents
+        .iter()
+        .find(|d| d.doc_type == "board")
+        .expect("Mind Map should have a board document");
+
+    // Parse the board content
+    let content = board_doc.content.as_ref().expect("board should have content");
+    let board: legend_keeper_mcp::lk::schema::BoardContent =
+        serde_json::from_value(content.clone()).expect("board content should parse");
+
+    assert!(
+        !board.shapes_v2.is_empty(),
+        "board should have shapesV2 records"
+    );
+
+    // Count record types
+    let mut shapes = 0;
+    let mut bindings_count = 0;
+    for record in &board.shapes_v2 {
+        match record.val.get("typeName").and_then(|v| v.as_str()) {
+            Some("shape") => shapes += 1,
+            Some("binding") => bindings_count += 1,
+            _ => {}
+        }
+    }
+    assert!(shapes > 0, "board should have shapes");
+    assert!(bindings_count > 0, "board should have bindings");
+    eprintln!(
+        "Board '{}': {} records ({} shapes, {} bindings)",
+        board_doc.name,
+        board.shapes_v2.len(),
+        shapes,
+        bindings_count
+    );
+}
+
+#[test]
+fn board_content_searchable() {
+    let store = WorldStore::load(Path::new("tests/reference")).unwrap();
+    let world = Some("rime".to_string());
+
+    // The Mind Map board has geo shapes with text labels — search for one
+    let results = store.search_content(&world, "Bryn Shander", Some(10)).unwrap();
+    let board_results: Vec<_> = results
+        .iter()
+        .filter(|r| r.document_name == "Main" && r.resource_name == "Mind Map")
+        .collect();
+    assert!(
+        !board_results.is_empty(),
+        "Should find 'Bryn Shander' in board shapes"
+    );
+    eprintln!("Board search results: {:?}", board_results);
+}

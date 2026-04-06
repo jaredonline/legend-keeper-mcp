@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use chrono::Utc;
 use serde::Serialize;
 
+use std::collections::HashSet;
+
 use super::io::{compute_hash, generate_id, write_lk_file};
-use super::schema::{Banner, Document, LkRoot, Presentation, Property, Resource};
+use super::schema::{Banner, BoardContent, Document, LkRoot, Presentation, Property, Resource};
 use super::LkError;
 use crate::prosemirror::from_markdown::from_markdown;
 
@@ -53,6 +55,11 @@ impl WorldBuilder {
         }
     }
 
+    /// Create a builder from an existing LkRoot. Preserves all IDs and content.
+    pub fn from_lk_root(name: String, root: LkRoot) -> Self {
+        Self { name, root }
+    }
+
     pub fn create_resource(
         &mut self,
         name: &str,
@@ -62,6 +69,9 @@ impl WorldBuilder {
         is_hidden: bool,
         aliases: Vec<String>,
         properties: Vec<Property>,
+        icon_color: Option<String>,
+        icon_glyph: Option<String>,
+        icon_shape: Option<String>,
     ) -> Result<DraftResourceSummary, LkError> {
         // Validate parent exists if specified
         if let Some(pid) = parent_id {
@@ -113,9 +123,9 @@ impl WorldBuilder {
             is_hidden,
             is_locked: false,
             show_property_bar: true,
-            icon_color: None,
-            icon_glyph: None,
-            icon_shape: None,
+            icon_color,
+            icon_glyph,
+            icon_shape,
             aliases,
             tags: tags.clone().unwrap_or_default(),
             documents: vec![doc],
@@ -161,6 +171,13 @@ impl WorldBuilder {
         // Convert markdown before taking mutable borrow
         let pm_content = if dtype == "page" {
             Some(from_markdown(content, &self.root.resources))
+        } else if dtype == "board" {
+            let value: serde_json::Value = serde_json::from_str(content)
+                .map_err(|e| LkError::InvalidInput(format!("invalid board JSON: {}", e)))?;
+            let board: BoardContent = serde_json::from_value(value.clone())
+                .map_err(|e| LkError::InvalidInput(format!("invalid board structure: {}", e)))?;
+            validate_board_content(&board)?;
+            Some(value)
         } else {
             serde_json::from_str(content).ok()
         };
@@ -237,6 +254,228 @@ impl WorldBuilder {
         Ok(())
     }
 
+    pub fn delete_resource(
+        &mut self,
+        resource_id: &str,
+        recursive: bool,
+    ) -> Result<Vec<String>, LkError> {
+        // Check resource exists
+        if !self.root.resources.iter().any(|r| r.id == resource_id) {
+            return Err(LkError::DraftResourceNotFound(resource_id.to_string()));
+        }
+
+        // Collect IDs to delete
+        let mut to_delete = HashSet::new();
+        to_delete.insert(resource_id.to_string());
+
+        if recursive {
+            // Find all descendants via stack-based traversal
+            let mut stack = vec![resource_id.to_string()];
+            while let Some(parent) = stack.pop() {
+                for r in &self.root.resources {
+                    if r.parent_id.as_deref() == Some(&parent) && !to_delete.contains(&r.id) {
+                        to_delete.insert(r.id.clone());
+                        stack.push(r.id.clone());
+                    }
+                }
+            }
+        } else {
+            // Check for children — refuse if any exist
+            let has_children = self
+                .root
+                .resources
+                .iter()
+                .any(|r| r.parent_id.as_deref() == Some(resource_id));
+            if has_children {
+                return Err(LkError::InvalidInput(format!(
+                    "Resource {} has children. Use recursive=true to delete them, or reparent them first.",
+                    resource_id
+                )));
+            }
+        }
+
+        self.root
+            .resources
+            .retain(|r| !to_delete.contains(&r.id));
+        self.root.resource_count = self.root.resources.len();
+
+        let mut deleted: Vec<String> = to_delete.into_iter().collect();
+        deleted.sort();
+        Ok(deleted)
+    }
+
+    pub fn reparent_resource(
+        &mut self,
+        resource_id: &str,
+        new_parent_id: Option<&str>,
+    ) -> Result<(), LkError> {
+        // Check resource exists
+        if !self.root.resources.iter().any(|r| r.id == resource_id) {
+            return Err(LkError::DraftResourceNotFound(resource_id.to_string()));
+        }
+
+        // Validate new parent exists (if not moving to top-level)
+        if let Some(pid) = new_parent_id {
+            if pid == resource_id {
+                return Err(LkError::InvalidInput(
+                    "Cannot parent a resource under itself".to_string(),
+                ));
+            }
+            if !self.root.resources.iter().any(|r| r.id == pid) {
+                return Err(LkError::DraftResourceNotFound(pid.to_string()));
+            }
+            // Check for circular parenting: walk new_parent's ancestor chain
+            let max_depth = self.root.resources.len();
+            let mut ancestor = Some(pid.to_string());
+            let mut depth = 0;
+            while let Some(ref aid) = ancestor {
+                if aid == resource_id {
+                    return Err(LkError::InvalidInput(
+                        "Cannot reparent: would create a circular reference".to_string(),
+                    ));
+                }
+                depth += 1;
+                if depth > max_depth {
+                    return Err(LkError::InvalidInput(
+                        "Cycle detected in resource tree".to_string(),
+                    ));
+                }
+                ancestor = self
+                    .root
+                    .resources
+                    .iter()
+                    .find(|r| r.id == *aid)
+                    .and_then(|r| r.parent_id.clone());
+            }
+        }
+
+        // Apply the reparent
+        let resource = self
+            .root
+            .resources
+            .iter_mut()
+            .find(|r| r.id == resource_id)
+            .expect("resource existence validated above");
+        resource.parent_id = new_parent_id.map(|s| s.to_string());
+
+        Ok(())
+    }
+
+    /// Look up a draft resource by ID (exact) or name (case-insensitive).
+    /// Tries ID first, falls back to name — same lookup pattern as WorldStore.
+    pub fn get_draft_resource(&self, id_or_name: &str) -> Result<&Resource, LkError> {
+        // Try exact ID match
+        if let Some(r) = self.root.resources.iter().find(|r| r.id == id_or_name) {
+            return Ok(r);
+        }
+        // Fallback: case-insensitive name match
+        let lower = id_or_name.to_lowercase();
+        self.root
+            .resources
+            .iter()
+            .find(|r| r.name.to_lowercase() == lower)
+            .ok_or_else(|| LkError::DraftResourceNotFound(id_or_name.to_string()))
+    }
+
+    /// Get a specific document from a draft resource.
+    /// If document_id is None, returns the first page-type document.
+    pub fn get_draft_document(
+        &self,
+        resource_id: &str,
+        document_id: Option<&str>,
+    ) -> Result<&Document, LkError> {
+        let resource = self
+            .root
+            .resources
+            .iter()
+            .find(|r| r.id == resource_id)
+            .ok_or_else(|| LkError::DraftResourceNotFound(resource_id.to_string()))?;
+
+        match document_id {
+            Some(did) => resource
+                .documents
+                .iter()
+                .find(|d| d.id == did)
+                .ok_or_else(|| LkError::DraftDocumentNotFound(did.to_string())),
+            None => resource
+                .documents
+                .iter()
+                .find(|d| d.doc_type == "page")
+                .ok_or_else(|| {
+                    LkError::DraftDocumentNotFound("no page document found".to_string())
+                }),
+        }
+    }
+
+    /// Update non-None metadata fields on a draft resource.
+    pub fn update_resource(
+        &mut self,
+        resource_id: &str,
+        name: Option<&str>,
+        tags: Option<Vec<String>>,
+        is_hidden: Option<bool>,
+        aliases: Option<Vec<String>>,
+    ) -> Result<DraftResourceSummary, LkError> {
+        let resource = self
+            .root
+            .resources
+            .iter_mut()
+            .find(|r| r.id == resource_id)
+            .ok_or_else(|| LkError::DraftResourceNotFound(resource_id.to_string()))?;
+
+        if let Some(n) = name {
+            resource.name = n.to_string();
+        }
+        if let Some(t) = tags {
+            resource.tags = t;
+        }
+        if let Some(h) = is_hidden {
+            resource.is_hidden = h;
+        }
+        if let Some(a) = aliases {
+            resource.aliases = a;
+        }
+
+        Ok(DraftResourceSummary {
+            id: resource.id.clone(),
+            name: resource.name.clone(),
+            parent_id: resource.parent_id.clone(),
+            tags: resource.tags.clone(),
+            document_count: resource.documents.len(),
+        })
+    }
+
+    /// Delete a document from a draft resource.
+    /// Fails if it would leave the resource with zero documents.
+    pub fn delete_document(
+        &mut self,
+        resource_id: &str,
+        document_id: &str,
+    ) -> Result<String, LkError> {
+        let resource = self
+            .root
+            .resources
+            .iter_mut()
+            .find(|r| r.id == resource_id)
+            .ok_or_else(|| LkError::DraftResourceNotFound(resource_id.to_string()))?;
+
+        if resource.documents.len() <= 1 {
+            return Err(LkError::InvalidInput(
+                "Cannot delete the last document on a resource".to_string(),
+            ));
+        }
+
+        let idx = resource
+            .documents
+            .iter()
+            .position(|d| d.id == document_id)
+            .ok_or_else(|| LkError::DraftDocumentNotFound(document_id.to_string()))?;
+
+        let doc_name = resource.documents[idx].name.clone();
+        resource.documents.remove(idx);
+        Ok(doc_name)
+    }
+
     pub fn list_draft(&self) -> DraftSummary {
         DraftSummary {
             name: self.name.clone(),
@@ -278,6 +517,71 @@ impl WorldBuilder {
         write_lk_file(&path, &self.root)?;
         Ok(path)
     }
+}
+
+/// Validate board content records have required fields for LegendKeeper import.
+fn validate_board_content(board: &BoardContent) -> Result<(), LkError> {
+    for (i, record) in board.shapes_v2.iter().enumerate() {
+        let val = &record.val;
+        let ctx = format!("shapesV2[{}] (key={})", i, record.key);
+
+        // Every record must have id, typeName, and meta
+        if val.get("id").and_then(|v| v.as_str()).is_none() {
+            return Err(LkError::InvalidInput(format!(
+                "{}: missing required field 'id'",
+                ctx
+            )));
+        }
+        if val.get("meta").is_none() {
+            return Err(LkError::InvalidInput(format!(
+                "{}: missing required field 'meta'",
+                ctx
+            )));
+        }
+        let type_name = val.get("typeName").and_then(|v| v.as_str()).ok_or_else(|| {
+            LkError::InvalidInput(format!("{}: missing required field 'typeName'", ctx))
+        })?;
+
+        match type_name {
+            "binding" => {
+                for field in &["type", "fromId", "toId", "props"] {
+                    if val.get(*field).is_none() {
+                        return Err(LkError::InvalidInput(format!(
+                            "{}: binding missing required field '{}'",
+                            ctx, field
+                        )));
+                    }
+                }
+            }
+            "shape" => {
+                for field in &["type", "props", "parentId", "index"] {
+                    if val.get(*field).is_none() {
+                        return Err(LkError::InvalidInput(format!(
+                            "{}: shape missing required field '{}'",
+                            ctx, field
+                        )));
+                    }
+                }
+                // All tldraw shapes require scale in props
+                if let Some(props) = val.get("props") {
+                    if props.get("scale").is_none() {
+                        return Err(LkError::InvalidInput(format!(
+                            "{}: shape props missing required field 'scale'",
+                            ctx
+                        )));
+                    }
+                }
+            }
+            "document" | "page" => {} // minimal fields, id+typeName+meta suffice
+            other => {
+                return Err(LkError::InvalidInput(format!(
+                    "{}: unknown typeName '{}'",
+                    ctx, other
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn default_export_dir() -> Result<PathBuf, LkError> {

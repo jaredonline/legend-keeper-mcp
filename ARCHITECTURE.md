@@ -12,7 +12,7 @@ The user downloads `.lk` exports from Legend Keeper, drops them into the worlds 
 
 ## Project Phases
 
-- **Phase 1 (current):** Read-only local server. Load `.lk` into memory, expose 7 read tools via stdio. No file writes. DM sees everything including hidden content (annotated).
+- **Phase 1 (current):** Read-only local server. Load `.lk` into memory, expose 8 read tools via stdio. No file writes. DM sees everything including hidden content (annotated).
 - **Phase 2 (next):** World generation. LLM builds a world from scratch via tool calls, then exports a `.lk` file for import into Legend Keeper. Adds `from_markdown.rs`, `write_lk_file()`, `WorldBuilder`, and 6 generation tools. One-way flow: LLM → `.lk` file → import.
 - **Phase 3 (future):** Player-view web server. HTTP transport with shared-secret auth. Hard-filters all hidden content (resources, documents, properties) before storing in memory — hidden data never exists in the queryable store. Transitive visibility: if a parent resource is hidden, the entire subtree is removed. Containerized for deployment (EKS or similar).
 - **Phase 4 (future):** Write tools that mutate existing worlds in-place. Read an existing `.lk`, modify resources, write it back. Superset of Phase 2's generation capabilities applied to existing data.
@@ -57,19 +57,20 @@ Resource
 
 ### Document
 
-Each resource has 1-3 documents. Three document types exist:
+Each resource has 1-3 documents. Four document types exist:
 
 | Type | `content` shape | Extra fields |
 |------|----------------|--------------|
 | `"page"` | ProseMirror JSON (`{type: "doc", content: [...]}`) | — |
 | `"map"` | `MapContent` JSON (`{pins: [...]}`) | `map: {locatorId, mapId, min_x, max_x, min_y, max_y, max_zoom}` |
 | `"time"` | Timeline JSON (`{lanes: [...], events: [...]}`) | `calendarId: String` (references calendar by ID or built-in name like "harptos") |
+| `"board"` | `BoardContent` JSON (`{shapesV2: [{key, val}...]}`) | `presentation.documentType: "board"` — tldraw whiteboard canvas with shapes (geo, arrow, text, line) and bindings |
 
 ```
 Document
 ├── id: String
 ├── name: String (e.g. "Main", "DMs Notes", "Map", "Timeline")
-├── type: String ("page" | "map" | "time")
+├── type: String ("page" | "map" | "time" | "board")
 ├── locatorId: String (full path reference)
 ├── pos: String
 ├── isHidden: bool
@@ -317,15 +318,16 @@ All tools that operate on a specific world take a `world` parameter (the filenam
 | `list_resources` | `world?: String`, `tag?: String`, `name?: String` | JSON array of `{id, name, tags, parentId, isHidden}` summaries |
 | `get_resource` | `world?: String`, `id_or_name: String` | Resource metadata + each document's content as markdown. Hidden documents and properties are included with `*(hidden)*` annotations so the LLM can reason about visibility. Map docs include pins, regions with vertex coordinates, paths with full waypoint coordinates, labels, and calibration. Timeline docs rendered with lane/event summaries. |
 | `get_resource_tree` | `world?: String`, `root_id?: String` | Nested JSON tree: `{id, name, children: [...]}` |
-| `search_content` | `world?: String`, `query: String`, `limit?: usize` | Array of `{resourceId, resourceName, documentName, snippet, isHidden}`. Searches all pages (including hidden) + timeline event names. |
+| `search_content` | `world?: String`, `query: String`, `limit?: usize` | Array of `{resourceId, resourceName, documentName, snippet, isHidden}`. Searches all pages (including hidden), timeline event names, and board shape text. |
 | `get_calendar` | `world?: String`, `id_or_name: String` | Calendar definition: month/weekday/era structure |
 | `get_map` | `world?: String`, `id_or_name: String` | Map metadata + pins with positions, regions with full vertex coordinates, paths with full waypoint coordinates, labels, and calibration for a resource's map document. Coordinates enable precise distance/area calculations. Errors if resource has no map. |
+| `get_board` | `world?: String`, `id_or_name: String` | Board summary: shape counts by type (geo, arrow, text, line), labeled geo nodes with position/color, text labels with scale/position, and graph connections derived from arrow bindings. Errors if resource has no board. |
 
-### Phase 2: Generation Tools (8 tools)
+### Phase 2: Generation Tools (14 tools)
 
-The generation tools let the LLM build a new world from scratch during a conversation and export it as a `.lk` file. The world is assembled in memory via a `WorldBuilder` — separate from the read-only `WorldStore`. The LLM sends content as markdown, which is converted to ProseMirror for the `.lk` file. Only one world can be built at a time per session. Resources default to hidden (`isHidden: true`) so exported worlds are safe to import — the DM unhides resources in Legend Keeper after review. Set `is_hidden: false` explicitly to make a resource visible.
+The generation tools let the LLM build a new world from scratch during a conversation and export it as a `.lk` file. The world is assembled in memory via a `WorldBuilder` — separate from the read-only `WorldStore`. The LLM sends content as markdown, which is converted to ProseMirror for the `.lk` file. Only one world can be built at a time per session. Resources default to hidden (`isHidden: true`) so exported worlds are safe to import — the DM unhides resources in Legend Keeper after review. Set `is_hidden: false` explicitly to make a resource visible. Draft resources can be deleted, reparented, read back, and edited before export.
 
-Templates are extracted from loaded worlds — Legend Keeper stores templates as resources under a special "templates" parent. When creating a resource, the LLM can specify a template name to copy its property blocks (IMAGE, TAGS, ALIASES, FRIENDS, ENEMIES, etc.) onto the new resource. Relationship properties are created as empty blocks — they cannot be populated during generation.
+Templates are extracted from loaded worlds — Legend Keeper stores templates as resources under a special "templates" parent. When creating a resource, the LLM can specify a template name to copy its property blocks (IMAGE, TAGS, ALIASES, FRIENDS, ENEMIES, etc.) and icon fields (color, glyph, shape) onto the new resource. Relationship properties are created as empty blocks — they cannot be populated during generation.
 
 | Method | Input | Output |
 |--------|-------|--------|
@@ -335,8 +337,15 @@ Templates are extracted from loaded worlds — Legend Keeper stores templates as
 | `add_document` | `resource_id: String`, `name: String`, `content: String`, `type?: String`, `is_hidden?: bool` | Created document summary |
 | `set_content` | `resource_id: String`, `document_id?: String`, `content: String` | Confirmation |
 | `list_draft` | *(none)* | Summary of in-progress world (resource names, hierarchy) |
+| `load_draft` | `name: String` | Loads an existing world into the draft builder for editing. Checks exports directory first (`~/.lk-worlds/exports/{name}.lk`), then falls back to cloning from the WorldStore. Replaces any existing draft. |
 | `export_world` | `output_path?: String` | File path to the generated `.lk` file |
 | `batch_create` | `world_name?: String`, `template_world?: String`, `resources: Vec<BatchResourceSpec>` | Summary of all created resources. Each resource spec includes name, parent, tags, content, template, aliases, is_hidden, and additional documents. Creates the draft world if `world_name` is provided and no draft exists. Parent references can use names of resources earlier in the same batch. |
+| `delete_resource` | `resource_id: String`, `recursive?: bool` | Deletes a resource from the draft. If `recursive` is true, deletes the entire subtree. If false (default), fails when the resource has children. Returns list of deleted IDs. |
+| `reparent_resource` | `resource_id: String`, `new_parent_id?: String` | Moves a resource to a different parent in the draft. Omit `new_parent_id` to make it top-level. Prevents circular references. |
+| `get_draft_resource` | `id_or_name: String` | Full resource with all documents rendered as markdown. Mirrors `get_resource` format but reads from the draft `WorldBuilder`. Lookup: ID-first, name-fallback (case-insensitive). |
+| `get_draft_document` | `resource_id: String`, `document_id?: String` | Single document content as markdown with metadata. If `document_id` omitted, returns the first page document. |
+| `update_draft_resource` | `resource_id: String`, `name?: String`, `tags?: Vec<String>`, `is_hidden?: bool`, `aliases?: Vec<String>` | Updates metadata (not content) on a draft resource. Tags and aliases are full replacements. Returns updated summary. |
+| `delete_document` | `resource_id: String`, `document_id: String` | Removes a document from a draft resource. Fails if it would leave zero documents. |
 
 Generation tools coexist with read tools — the LLM can read from existing worlds for reference while building a new one.
 
@@ -344,7 +353,7 @@ Generation tools coexist with read tools — the LLM can read from existing worl
 
 In player mode (`--player`), the server operates identically to Phase 1 but with two key differences:
 
-1. **Visibility filtering**: All hidden content is removed from memory at load time. The same 7 read tools are exposed, but they can only return player-visible data.
+1. **Visibility filtering**: All hidden content is removed from memory at load time. The same 8 read tools are exposed, but they can only return player-visible data.
 2. **HTTP transport + auth**: Instead of stdio, the server listens on HTTP with `Authorization: Bearer <token>` authentication. Friends connect their own LLM clients (Claude Desktop, ChatGPT, etc.) to the remote URL.
 
 **Filtering rules** (applied after `read_lk_file()`, before storing in WorldStore):
