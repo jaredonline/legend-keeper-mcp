@@ -585,6 +585,7 @@ fn validate_board_content(board: &BoardContent) -> Result<(), LkError> {
 }
 
 /// Public wrapper for tests — validates board content records.
+#[cfg(test)]
 pub fn validate_board_content_pub(board: &BoardContent) -> Result<(), LkError> {
     validate_board_content(board)
 }
