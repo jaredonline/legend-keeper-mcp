@@ -8,6 +8,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::lk::board_gen::{GraphEdge, GraphNode};
 use crate::lk::builder::WorldBuilder;
 use crate::lk::schema::{Document, MapContent, Resource, TimelineContent};
 use crate::lk::store::WorldStore;
@@ -210,6 +211,20 @@ pub struct LoadDraftParams {
 pub struct ExportWorldParams {
     /// Output file path. Defaults to ~/.lk-worlds/exports/{name}.lk
     pub output_path: Option<String>,
+}
+
+// --- Graph board types ---
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AddBoardFromGraphParams {
+    /// Resource ID to attach the board document to.
+    pub resource_id: String,
+    /// Document name (e.g. "Node Map", "Scenario Graph").
+    pub name: String,
+    /// Node definitions.
+    pub nodes: Vec<GraphNode>,
+    /// Edge definitions (arrows between nodes).
+    pub edges: Vec<GraphEdge>,
 }
 
 // --- Batch creation types ---
@@ -786,13 +801,35 @@ impl LkServer {
         });
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     }
+
+    #[tool(description = "Add a board document from a high-level node graph. Converts nodes and edges into a tldraw board with deterministic column-based layout. Board documents are always hidden (node graphs contain GM spoilers). Use this instead of manually constructing tldraw JSON.")]
+    async fn add_board_from_graph(
+        &self,
+        Parameters(params): Parameters<AddBoardFromGraphParams>,
+    ) -> Result<String, String> {
+        // Validate graph before taking the builder lock
+        crate::lk::board_gen::validate_graph(&params.nodes, &params.edges)
+            .map_err(|e| e.to_string())?;
+
+        let board = crate::lk::board_gen::graph_to_board_content(&params.nodes, &params.edges);
+        let json = serde_json::to_string(&board).map_err(|e| e.to_string())?;
+
+        let mut builder = self.builder.lock().map_err(|e| e.to_string())?;
+        let b = builder
+            .as_mut()
+            .ok_or_else(|| "No draft world — call create_world first".to_string())?;
+        let summary = b
+            .add_document(&params.resource_id, &params.name, &json, Some("board"), true)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
+    }
 }
 
 #[tool_handler]
 impl ServerHandler for LkServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            instructions: Some("Legend Keeper MCP server. Provides read access to .lk world-building files. Use list_worlds to see available worlds, then browse resources, search content, and view calendars. You can also generate new worlds: call list_templates first to see available templates (NPC, Location, etc.), then use batch_create to create the world and all resources with their documents in a single call. Each resource can have a template, content, tags, aliases, visibility, and additional documents (like DM Notes). Use export_world when done to produce a .lk file for import into Legend Keeper. Use load_draft to reload a previously exported world for continued editing. Prefer batch_create over individual create_resource/add_document calls for efficiency. Resources are hidden by default so the DM can review before showing to players — set is_hidden to false to make a resource immediately visible. Use delete_resource and reparent_resource to clean up or reorganize the draft before exporting. Use get_draft_resource and get_draft_document to review draft content, update_draft_resource to fix metadata (name, tags, visibility, aliases), and delete_document to remove unwanted documents.".to_string()),
+            instructions: Some("Legend Keeper MCP server. Provides read access to .lk world-building files. Use list_worlds to see available worlds, then browse resources, search content, and view calendars. You can also generate new worlds: call list_templates first to see available templates (NPC, Location, etc.), then use batch_create to create the world and all resources with their documents in a single call. Each resource can have a template, content, tags, aliases, visibility, and additional documents (like DM Notes). Use export_world when done to produce a .lk file for import into Legend Keeper. Use load_draft to reload a previously exported world for continued editing. Prefer batch_create over individual create_resource/add_document calls for efficiency. Resources are hidden by default so the DM can review before showing to players — set is_hidden to false to make a resource immediately visible. Use delete_resource and reparent_resource to clean up or reorganize the draft before exporting. Use get_draft_resource and get_draft_document to review draft content, update_draft_resource to fix metadata (name, tags, visibility, aliases), and delete_document to remove unwanted documents. Use add_board_from_graph to create tldraw board documents from a high-level node graph (nodes + edges) — the server handles layout and tldraw JSON generation. Board documents are always hidden.".to_string()),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..ServerInfo::default()
         }

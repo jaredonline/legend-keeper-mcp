@@ -1,3 +1,4 @@
+pub mod board_gen;
 pub mod builder;
 pub mod io;
 pub mod schema;

@@ -584,6 +584,11 @@ fn validate_board_content(board: &BoardContent) -> Result<(), LkError> {
     Ok(())
 }
 
+/// Public wrapper for tests — validates board content records.
+pub fn validate_board_content_pub(board: &BoardContent) -> Result<(), LkError> {
+    validate_board_content(board)
+}
+
 fn default_export_dir() -> Result<PathBuf, LkError> {
     let home = std::env::var("HOME")
         .map_err(|_| LkError::InvalidInput("HOME environment variable not set".to_string()))?;

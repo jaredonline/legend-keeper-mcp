@@ -267,6 +267,7 @@ legend-keeper-mcp/
     │   ├── mod.rs           # Re-exports, LkError enum
     │   ├── schema.rs        # All serde types for .lk JSON (LkRoot, Resource, Document, etc.)
     │   ├── store.rs         # WorldStore: manages multiple worlds, file watching, hot-reload
+    │   ├── board_gen.rs     # Graph-to-tldraw board generation (add_board_from_graph)
     │   └── io.rs            # read_lk_file() — gzip decompression
     └── prosemirror/
         ├── mod.rs           # Re-exports
@@ -335,6 +336,7 @@ Templates are extracted from loaded worlds — Legend Keeper stores templates as
 | `list_templates` | `world?: String` | Available template names with property block summaries |
 | `create_resource` | `name: String`, `parent_id?: String`, `tags?: Vec<String>`, `content?: String`, `is_hidden?: bool`, `template?: String`, `aliases?: Vec<String>` | Created resource summary (id, name) |
 | `add_document` | `resource_id: String`, `name: String`, `content: String`, `type?: String`, `is_hidden?: bool` | Created document summary |
+| `add_board_from_graph` | `resource_id: String`, `name: String`, `nodes: Vec<GraphNode>`, `edges: Vec<GraphEdge>` | Creates a tldraw board document from a high-level node graph. Server handles layout (column-based by node_type) and tldraw JSON generation. Board is always hidden. GraphNode has `{id, label, node_type}`, GraphEdge has `{from, to, label?}`. |
 | `set_content` | `resource_id: String`, `document_id?: String`, `content: String` | Confirmation |
 | `list_draft` | *(none)* | Summary of in-progress world (resource names, hierarchy) |
 | `load_draft` | `name: String` | Loads an existing world into the draft builder for editing. Checks exports directory first (`~/.lk-worlds/exports/{name}.lk`), then falls back to cloning from the WorldStore. Replaces any existing draft. |
