@@ -151,6 +151,9 @@ pub fn graph_to_board_content(nodes: &[GraphNode], edges: &[GraphEdge]) -> Board
     // Track node positions for arrow generation
     let mut node_positions: HashMap<&str, (f64, f64)> = HashMap::new();
 
+    // Flat counter for node shape indices (tldraw IndexKey forbids underscores)
+    let mut node_idx: usize = 0;
+
     // Column header offset: title sits above the first node row
     let title_y_offset = -80.0;
 
@@ -206,7 +209,7 @@ pub fn graph_to_board_content(nodes: &[GraphNode], edges: &[GraphEdge]) -> Board
                     "opacity": 1,
                     "meta": {},
                     "parentId": "page:page",
-                    "index": format!("b{}_{}", col_idx, row_idx),
+                    "index": format!("b{}", node_idx),
                     "props": {
                         "geo": geo_for_type(&node.node_type),
                         "w": NODE_WIDTH,
@@ -225,6 +228,7 @@ pub fn graph_to_board_content(nodes: &[GraphNode], edges: &[GraphEdge]) -> Board
                     }
                 }),
             });
+            node_idx += 1;
         }
     }
 
